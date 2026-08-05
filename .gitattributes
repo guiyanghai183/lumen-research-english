@@ -1,0 +1,2 @@
+# Keep bundled reading materials out of text diffs and whitespace checks.
+*.pdf binary
