@@ -3,6 +3,8 @@ package com.lumen.researchenglish.ui
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,7 +32,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -269,20 +271,26 @@ fun ReaderScreen(
     ) {
         val currentBitmap = bitmap
         if (currentBitmap != null) {
-            Image(
-                bitmap = currentBitmap.asImageBitmap(),
-                contentDescription = "PDF page ${page + 1}",
-                contentScale = ContentScale.Crop,
-                colorFilter = pageColorFilter,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = scale,
-                        scaleY = scale,
-                        translationX = offsetX,
-                        translationY = offsetY,
-                    ),
-            )
+            Crossfade(
+                targetState = currentBitmap,
+                animationSpec = tween(durationMillis = 160),
+                label = "reader-page-crossfade",
+            ) { shownBitmap ->
+                Image(
+                    bitmap = shownBitmap.asImageBitmap(),
+                    contentDescription = "PDF page ${page + 1}",
+                    contentScale = ContentScale.Crop,
+                    colorFilter = pageColorFilter,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer(
+                            scaleX = scale,
+                            scaleY = scale,
+                            translationX = offsetX,
+                            translationY = offsetY,
+                        ),
+                )
+            }
 
             AnnotationLayer(
                 bitmapWidth = currentBitmap.width,
@@ -392,7 +400,9 @@ fun ReaderScreen(
                     }
                 },
                 onSpeak = { viewModel.speak(selectedSource, speechRequestId) },
-                onSave = { viewModel.saveSelection(selectedSource, translation) },
+                onSave = {
+                    viewModel.saveSelection(selectedSource, tutorMarkdownPlainText(translation))
+                },
                 onClose = ::closeSelection,
             )
         }
@@ -770,6 +780,15 @@ private fun PositionAwareSelectionLayer(
     }
 
     Box(Modifier.fillMaxSize()) {
+        if (selectedWords.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(selectedWords) {
+                        detectTapGestures(onTap = { onClose() })
+                    },
+            )
+        }
         words.forEach { word ->
             val left = metrics.x(metrics.pageLeft + word.left * metrics.shownWidth) - touchPadding
             val top = metrics.y(metrics.pageTop + word.top * metrics.shownHeight) - touchPadding
@@ -829,7 +848,7 @@ private fun PositionAwareSelectionLayer(
                 containerWidthPx - with(density) { 20.dp.toPx() },
             ).coerceAtLeast(with(density) { 250.dp.toPx() })
             val estimatedPanelHeight = with(density) {
-                (if (translationExpanded) 292.dp else 166.dp).toPx()
+                (if (translationExpanded) 440.dp else 238.dp).toPx()
             }
             val horizontalMargin = with(density) { 10.dp.toPx() }
             val verticalMargin = with(density) { 10.dp.toPx() }
@@ -906,7 +925,9 @@ private fun SelectionActionCard(
     modifier: Modifier = Modifier,
 ) {
     Card(
-        modifier = modifier,
+        modifier = modifier.pointerInput(Unit) {
+            detectTapGestures(onTap = {})
+        },
         shape = RoundedCornerShape(24.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -947,11 +968,35 @@ private fun SelectionActionCard(
             }
 
             Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
                     .padding(top = 5.dp),
+            ) {
+                SelectionTool(
+                    Icons.Outlined.School,
+                    "Ask Tutor",
+                    onAskTutor,
+                    emphasized = true,
+                    modifier = Modifier.weight(1f),
+                )
+                SelectionTool(
+                    Icons.Outlined.Translate,
+                    "Translate",
+                    onTranslate,
+                    modifier = Modifier.weight(1f),
+                )
+                SelectionTool(
+                    Icons.AutoMirrored.Outlined.VolumeUp,
+                    if (selectionSpeaking) "Stop" else "Read",
+                    onSpeak,
+                    active = selectionSpeaking,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 AnnotationStyleTool(
                     icon = Icons.Outlined.FormatColorFill,
@@ -959,6 +1004,7 @@ private fun SelectionActionCard(
                     removeLabel = "Remove highlight",
                     onColor = onHighlight,
                     onRemove = onRemoveHighlight,
+                    modifier = Modifier.weight(1f),
                 )
                 AnnotationStyleTool(
                     icon = Icons.Outlined.FormatUnderlined,
@@ -966,20 +1012,9 @@ private fun SelectionActionCard(
                     removeLabel = "Remove underline",
                     onColor = onUnderline,
                     onRemove = onRemoveUnderline,
+                    modifier = Modifier.weight(1f),
                 )
-                SelectionTool(
-                    Icons.Outlined.School,
-                    "Ask Tutor",
-                    onAskTutor,
-                    emphasized = true,
-                )
-                SelectionTool(Icons.Outlined.Translate, "Translate", onTranslate)
-                SelectionTool(
-                    Icons.AutoMirrored.Outlined.VolumeUp,
-                    if (selectionSpeaking) "Stop" else "Read",
-                    onSpeak,
-                    active = selectionSpeaking,
-                )
+                Spacer(Modifier.weight(1f))
             }
 
             if (translationExpanded) {
@@ -991,12 +1026,17 @@ private fun SelectionActionCard(
                         .padding(top = 8.dp),
                 ) {
                     Text(
-                        text = translation.ifBlank { "Translating…" },
+                        text = renderTutorMarkdown(
+                            markdown = translation.ifBlank { "Translating…" },
+                            accentColor = Indigo,
+                            codeBackground = MaterialTheme.colorScheme.surfaceVariant,
+                        ),
                         color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 6,
-                        overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
+                        modifier = Modifier
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 13.dp, vertical = 11.dp),
                     )
                 }
                 Row(
@@ -1025,10 +1065,16 @@ private fun AnnotationStyleTool(
     removeLabel: String,
     onColor: (String) -> Unit,
     onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    Box {
-        SelectionTool(icon, label, onClick = { expanded = true })
+    Box(modifier) {
+        SelectionTool(
+            icon,
+            label,
+            onClick = { expanded = true },
+            modifier = Modifier.fillMaxWidth(),
+        )
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
@@ -1074,12 +1120,13 @@ private fun SelectionTool(
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     active: Boolean = false,
     emphasized: Boolean = false,
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .background(
@@ -1304,7 +1351,15 @@ private fun ReaderTutorBubble(role: String, content: String) {
             modifier = Modifier.fillMaxWidth(0.86f),
         ) {
             Text(
-                content,
+                text = if (isUser) {
+                    androidx.compose.ui.text.AnnotatedString(content)
+                } else {
+                    renderTutorMarkdown(
+                        markdown = content,
+                        accentColor = Indigo,
+                        codeBackground = MaterialTheme.colorScheme.surface,
+                    )
+                },
                 color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface,
                 lineHeight = MaterialTheme.typography.bodyMedium.lineHeight,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),

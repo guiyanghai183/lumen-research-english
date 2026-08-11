@@ -186,7 +186,9 @@ fun ChatScreen(viewModel: AppViewModel) {
                     speaking = speakingId == speechId,
                     speechProgress = if (speakingId == speechId) speechProgress else 0f,
                     streaming = false,
-                    onSpeak = { viewModel.speak(message.content, speechId) },
+                    onSpeak = {
+                        viewModel.speak(tutorMarkdownPlainText(message.content), speechId)
+                    },
                 )
             }
             streamingReply?.let { reply ->
@@ -441,6 +443,11 @@ private fun TutorFollowText(
     modifier: Modifier = Modifier,
 ) {
     var textLayout by remember(text) { mutableStateOf<TextLayoutResult?>(null) }
+    val renderedText = renderTutorMarkdown(
+        markdown = text,
+        accentColor = Indigo,
+        codeBackground = MaterialTheme.colorScheme.surfaceVariant,
+    )
     val density = LocalDensity.current
     val markerWidth = 16.dp
     val markerHeight = 3.dp
@@ -449,17 +456,17 @@ private fun TutorFollowText(
 
     Box(modifier = modifier) {
         Text(
-            text = text,
+            text = renderedText,
             color = MaterialTheme.colorScheme.onSurface,
             lineHeight = 22.sp,
             onTextLayout = { textLayout = it },
             modifier = Modifier.padding(bottom = 7.dp),
         )
         val layout = textLayout
-        if (active && progress > 0f && text.isNotEmpty() && layout != null) {
-            val characterIndex = ((text.length - 1) * progress.coerceIn(0f, 1f))
+        if (active && progress > 0f && renderedText.isNotEmpty() && layout != null) {
+            val characterIndex = ((renderedText.length - 1) * progress.coerceIn(0f, 1f))
                 .roundToInt()
-                .coerceIn(0, text.lastIndex)
+                .coerceIn(0, renderedText.lastIndex)
             val bounds = runCatching { layout.getBoundingBox(characterIndex) }.getOrNull()
             if (bounds != null) {
                 Box(

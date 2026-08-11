@@ -205,7 +205,11 @@ fun BairScreen(viewModel: AppViewModel) {
                     },
                     onSpeak = { viewModel.speak(selectedText, speechId) },
                     onSave = {
-                        viewModel.saveExternalSelection(selectedText, translation, sourceTitle)
+                        viewModel.saveExternalSelection(
+                            selectedText,
+                            tutorMarkdownPlainText(translation),
+                            sourceTitle,
+                        )
                         selectedText = ""
                         translationExpanded = false
                         webView.evaluateJavascript("window.getSelection().removeAllRanges();", null)
@@ -300,9 +304,13 @@ private fun BairSelectionCard(
             if (translationExpanded) {
                 Spacer(Modifier.height(7.dp))
                 Text(
-                    translation.ifBlank { "Translating…" },
+                    text = renderTutorMarkdown(
+                        markdown = translation.ifBlank { "Translating…" },
+                        accentColor = Indigo,
+                        codeBackground = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 5,
+                    maxLines = 8,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyMedium,
                 )
