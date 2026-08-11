@@ -4,6 +4,11 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -114,6 +119,7 @@ import com.lumen.researchenglish.data.ReaderAnnotation
 import com.lumen.researchenglish.data.ReaderBookmark
 import com.lumen.researchenglish.data.RecognizedWord
 import com.lumen.researchenglish.ui.theme.Indigo
+import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -1193,8 +1199,27 @@ private fun FixedTutorPanel(
     error: String?,
     onSend: (String) -> Unit,
 ) {
+    var panelVisible by remember { mutableStateOf(false) }
+    var dismissalRequested by remember { mutableStateOf(false) }
+
+    fun dismissWithAnimation() {
+        if (dismissalRequested) return
+        dismissalRequested = true
+        panelVisible = false
+    }
+
+    LaunchedEffect(Unit) {
+        panelVisible = true
+    }
+    LaunchedEffect(dismissalRequested) {
+        if (dismissalRequested) {
+            delay(TUTOR_PANEL_ANIMATION_MS.toLong())
+            onDismissRequest()
+        }
+    }
+
     Dialog(
-        onDismissRequest = onDismissRequest,
+        onDismissRequest = ::dismissWithAnimation,
         properties = DialogProperties(
             dismissOnBackPress = true,
             dismissOnClickOutside = true,
@@ -1205,41 +1230,62 @@ private fun FixedTutorPanel(
         val scrimInteraction = remember { MutableInteractionSource() }
         val panelInteraction = remember { MutableInteractionSource() }
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.32f))
-                .clickable(
-                    interactionSource = scrimInteraction,
-                    indication = null,
-                    onClick = onDismissRequest,
-                ),
+            modifier = Modifier.fillMaxSize(),
         ) {
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .clickable(
-                        interactionSource = panelInteraction,
-                        indication = null,
-                        onClick = {},
-                    ),
-                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp,
-                shadowElevation = 14.dp,
+            AnimatedVisibility(
+                visible = panelVisible,
+                enter = fadeIn(tween(TUTOR_SCRIM_ANIMATION_MS)),
+                exit = fadeOut(tween(TUTOR_SCRIM_ANIMATION_MS)),
+                modifier = Modifier.fillMaxSize(),
             ) {
-                ReaderTutorConversation(
-                    selection = selection,
-                    messages = messages,
-                    streamingReply = streamingReply,
-                    streaming = streaming,
-                    error = error,
-                    onSend = onSend,
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.32f))
+                        .clickable(
+                            interactionSource = scrimInteraction,
+                            indication = null,
+                            onClick = ::dismissWithAnimation,
+                        ),
                 )
+            }
+            AnimatedVisibility(
+                visible = panelVisible,
+                enter = fadeIn(tween(TUTOR_PANEL_ANIMATION_MS)) +
+                    slideInVertically(tween(TUTOR_PANEL_ANIMATION_MS)) { height -> height / 10 },
+                exit = fadeOut(tween(TUTOR_PANEL_ANIMATION_MS)) +
+                    slideOutVertically(tween(TUTOR_PANEL_ANIMATION_MS)) { height -> height / 10 },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            interactionSource = panelInteraction,
+                            indication = null,
+                            onClick = {},
+                        ),
+                    shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 2.dp,
+                    shadowElevation = 14.dp,
+                ) {
+                    ReaderTutorConversation(
+                        selection = selection,
+                        messages = messages,
+                        streamingReply = streamingReply,
+                        streaming = streaming,
+                        error = error,
+                        onSend = onSend,
+                    )
+                }
             }
         }
     }
 }
+
+private const val TUTOR_PANEL_ANIMATION_MS = 220
+private const val TUTOR_SCRIM_ANIMATION_MS = 180
 
 @Composable
 private fun ReaderTutorConversation(
