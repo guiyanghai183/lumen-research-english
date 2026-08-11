@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material3.AlertDialog
@@ -47,7 +46,6 @@ private data class Destination(
 
 private val destinations = listOf(
     Destination("library", "Library", Icons.Outlined.AutoStories),
-    Destination("bair", "BAIR", Icons.Outlined.Science),
     Destination("chat", "Chat", Icons.Outlined.ChatBubbleOutline),
     Destination("review", "Review", Icons.Outlined.TaskAlt),
     Destination("settings", "Settings", Icons.Outlined.Settings),
@@ -121,7 +119,6 @@ fun LumenApp(viewModel: AppViewModel = viewModel()) {
                         onOpenDocument = { navController.navigate("reader/$it") },
                     )
                 }
-                composable("bair") { BairScreen(viewModel) }
                 composable("chat") { ChatScreen(viewModel) }
                 composable("review") { ReviewScreen(viewModel) }
                 composable("settings") { SettingsScreen(viewModel) }

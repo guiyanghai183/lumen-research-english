@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,16 +26,20 @@ import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.RecordVoiceOver
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -52,7 +57,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lumen.researchenglish.network.DeepSeekBalance
 import com.lumen.researchenglish.ui.theme.SoftIndigo
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
 fun SettingsScreen(viewModel: AppViewModel) {
@@ -71,6 +79,12 @@ fun SettingsScreen(viewModel: AppViewModel) {
     val updateStatus by viewModel.updateStatus.collectAsStateWithLifecycle()
     val chatHistoryLimit by viewModel.chatHistoryLimit.collectAsStateWithLifecycle()
     val memoryUpdateFrequency by viewModel.memoryUpdateFrequency.collectAsStateWithLifecycle()
+    val hasDeepSeekKey by viewModel.hasDeepSeekKey.collectAsStateWithLifecycle()
+    val hasTencentCredentials by viewModel.hasTencentCredentials.collectAsStateWithLifecycle()
+    val deepSeekBalance by viewModel.deepSeekBalance.collectAsStateWithLifecycle()
+    val deepSeekBalanceRefreshing by viewModel.deepSeekBalanceRefreshing.collectAsStateWithLifecycle()
+    val deepSeekBalanceError by viewModel.deepSeekBalanceError.collectAsStateWithLifecycle()
+    val deepSeekBalanceUpdatedAt by viewModel.deepSeekBalanceUpdatedAt.collectAsStateWithLifecycle()
     var memoryDraft by rememberSaveable { mutableStateOf(memory) }
     var memoryDraftBase by rememberSaveable { mutableStateOf(memory) }
     var memoryDraftDirty by rememberSaveable { mutableStateOf(false) }
@@ -94,6 +108,10 @@ fun SettingsScreen(viewModel: AppViewModel) {
         } else if (memory != memoryDraftBase) {
             memoryChangedWhileEditing = true
         }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshDeepSeekBalance()
     }
 
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -195,7 +213,17 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Spacer(Modifier.height(12.dp))
-                StatusLine("DeepSeek", viewModel.hasDeepSeekKey)
+                StatusLine("DeepSeek", hasDeepSeekKey)
+                Spacer(Modifier.height(10.dp))
+                DeepSeekBalancePanel(
+                    configured = hasDeepSeekKey,
+                    balance = deepSeekBalance,
+                    refreshing = deepSeekBalanceRefreshing,
+                    error = deepSeekBalanceError,
+                    updatedAt = deepSeekBalanceUpdatedAt,
+                    onRefresh = viewModel::refreshDeepSeekBalance,
+                )
+                Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = deepSeekKey,
                     onValueChange = { deepSeekKey = it },
@@ -205,7 +233,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(12.dp))
-                StatusLine("Tencent Translation + Speech", viewModel.hasTencentCredentials)
+                StatusLine("Tencent Translation + Speech", hasTencentCredentials)
                 OutlinedTextField(
                     value = tencentId,
                     onValueChange = { tencentId = it },
@@ -439,6 +467,116 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     "OCR runs locally. Only selected translation text, Tutor messages, and text you choose to play are sent to their configured services.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeepSeekBalancePanel(
+    configured: Boolean,
+    balance: DeepSeekBalance?,
+    refreshing: Boolean,
+    error: String?,
+    updatedAt: Long?,
+    onRefresh: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("DeepSeek API balance", fontWeight = FontWeight.SemiBold)
+                    val availability = when {
+                        balance == null -> null
+                        balance.isAvailable -> "API calls available"
+                        else -> "Insufficient balance"
+                    }
+                    availability?.let {
+                        Text(
+                            it,
+                            color = if (balance?.isAvailable == true) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                }
+                if (refreshing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    IconButton(onClick = onRefresh, enabled = configured) {
+                        Icon(Icons.Outlined.Refresh, contentDescription = "Refresh DeepSeek balance")
+                    }
+                }
+            }
+
+            when {
+                !configured -> Text(
+                    "Add a DeepSeek API key to view its balance.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+                balance != null && balance.balances.isNotEmpty() -> {
+                    balance.balances.forEachIndexed { index, info ->
+                        if (index > 0) Spacer(Modifier.height(9.dp))
+                        Text(
+                            "${info.totalBalance.ifBlank { "—" }} ${info.currency.ifBlank { "Balance" }}",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            "Topped up ${info.toppedUpBalance.ifBlank { "—" }} · " +
+                                "Granted ${info.grantedBalance.ifBlank { "—" }}",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+
+                balance != null -> Text(
+                    "DeepSeek returned no balance entries.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+                refreshing -> Text(
+                    "Checking the current balance…",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+                error == null -> Text(
+                    "Balance has not been checked yet.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            error?.let {
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            updatedAt?.let {
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    "Last checked ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(it))}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
                 )
             }
         }

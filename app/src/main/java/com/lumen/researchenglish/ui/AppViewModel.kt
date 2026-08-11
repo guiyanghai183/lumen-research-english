@@ -24,6 +24,7 @@ import com.lumen.researchenglish.domain.LearningProgress
 import com.lumen.researchenglish.domain.DailyCheckInStats
 import com.lumen.researchenglish.domain.ReviewRating
 import com.lumen.researchenglish.network.AppUpdate
+import com.lumen.researchenglish.network.DeepSeekBalance
 import com.lumen.researchenglish.network.DeepSeekClient
 import com.lumen.researchenglish.network.TencentSpeechClient
 import com.lumen.researchenglish.network.TencentTranslator
@@ -191,6 +192,29 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _memoryStatus = MutableStateFlow("")
     val memoryStatus: StateFlow<String> = _memoryStatus.asStateFlow()
 
+    private val _deepSeekBalance = MutableStateFlow<DeepSeekBalance?>(null)
+    val deepSeekBalance: StateFlow<DeepSeekBalance?> = _deepSeekBalance.asStateFlow()
+
+    private val _deepSeekBalanceRefreshing = MutableStateFlow(false)
+    val deepSeekBalanceRefreshing: StateFlow<Boolean> = _deepSeekBalanceRefreshing.asStateFlow()
+
+    private val _deepSeekBalanceError = MutableStateFlow<String?>(null)
+    val deepSeekBalanceError: StateFlow<String?> = _deepSeekBalanceError.asStateFlow()
+
+    private val _deepSeekBalanceUpdatedAt = MutableStateFlow<Long?>(null)
+    val deepSeekBalanceUpdatedAt: StateFlow<Long?> = _deepSeekBalanceUpdatedAt.asStateFlow()
+
+    private val _hasDeepSeekKey = MutableStateFlow(
+        app.secretStore.get(SecretStore.DEEPSEEK_KEY).isNotBlank(),
+    )
+    val hasDeepSeekKey: StateFlow<Boolean> = _hasDeepSeekKey.asStateFlow()
+
+    private val _hasTencentCredentials = MutableStateFlow(
+        app.secretStore.get(SecretStore.TENCENT_SECRET_ID).isNotBlank() &&
+            app.secretStore.get(SecretStore.TENCENT_SECRET_KEY).isNotBlank(),
+    )
+    val hasTencentCredentials: StateFlow<Boolean> = _hasTencentCredentials.asStateFlow()
+
     private val _userAvatarUri = MutableStateFlow(app.profileStore.getUserAvatarUri())
     val userAvatarUri: StateFlow<String> = _userAvatarUri.asStateFlow()
 
@@ -279,13 +303,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var readerPrefetchRequest: ReaderPrefetchRequest? = null
     private var readerPrefetchJob: Job? = null
     private var readerPageLoadGeneration: Long = 0
-
-    val hasDeepSeekKey: Boolean
-        get() = app.secretStore.get(SecretStore.DEEPSEEK_KEY).isNotBlank()
-
-    val hasTencentCredentials: Boolean
-        get() = app.secretStore.get(SecretStore.TENCENT_SECRET_ID).isNotBlank() &&
-            app.secretStore.get(SecretStore.TENCENT_SECRET_KEY).isNotBlank()
+    private var deepSeekBalanceRequestGeneration: Long = 0
 
     fun importPdf(uri: Uri, type: String) = launchTask {
         app.documentRepository.importPdf(uri, type)
@@ -609,24 +627,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             context = sentenceAround(_readerText.value, clean),
             sourceTitle = document.title,
             sourcePage = _readerPage.value + 1,
-        )
-        refreshReviewClock()
-        awardLearningXp(5)
-    }
-
-    fun saveExternalSelection(
-        text: String,
-        translation: String = _translation.value,
-        sourceTitle: String,
-    ) = launchTask {
-        val clean = text.trim()
-        require(clean.isNotBlank()) { "Select a word or sentence first." }
-        app.vocabularyRepository.saveCard(
-            term = clean,
-            translation = translation.trim(),
-            context = "Selected from the BAIR Research Blog.",
-            sourceTitle = sourceTitle.ifBlank { "BAIR Research Blog" },
-            sourcePage = 0,
         )
         refreshReviewClock()
         awardLearningXp(5)
@@ -960,15 +960,61 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun saveApiSettings(deepSeekKey: String, secretId: String, secretKey: String) {
-        if (deepSeekKey.isNotBlank()) app.secretStore.put(SecretStore.DEEPSEEK_KEY, deepSeekKey.trim())
+        val savedDeepSeekKey = deepSeekKey.isNotBlank()
+        if (savedDeepSeekKey) app.secretStore.put(SecretStore.DEEPSEEK_KEY, deepSeekKey.trim())
         if (secretId.isNotBlank()) app.secretStore.put(SecretStore.TENCENT_SECRET_ID, secretId.trim())
         if (secretKey.isNotBlank()) app.secretStore.put(SecretStore.TENCENT_SECRET_KEY, secretKey.trim())
+        _hasDeepSeekKey.value = app.secretStore.get(SecretStore.DEEPSEEK_KEY).isNotBlank()
+        _hasTencentCredentials.value =
+            app.secretStore.get(SecretStore.TENCENT_SECRET_ID).isNotBlank() &&
+                app.secretStore.get(SecretStore.TENCENT_SECRET_KEY).isNotBlank()
+        if (savedDeepSeekKey) refreshDeepSeekBalance()
     }
 
     fun clearApiSettings() {
         app.secretStore.put(SecretStore.DEEPSEEK_KEY, "")
         app.secretStore.put(SecretStore.TENCENT_SECRET_ID, "")
         app.secretStore.put(SecretStore.TENCENT_SECRET_KEY, "")
+        _hasDeepSeekKey.value = false
+        _hasTencentCredentials.value = false
+        deepSeekBalanceRequestGeneration += 1
+        _deepSeekBalance.value = null
+        _deepSeekBalanceRefreshing.value = false
+        _deepSeekBalanceError.value = null
+        _deepSeekBalanceUpdatedAt.value = null
+    }
+
+    fun refreshDeepSeekBalance() {
+        val apiKey = app.secretStore.get(SecretStore.DEEPSEEK_KEY)
+        if (apiKey.isBlank()) {
+            _deepSeekBalance.value = null
+            _deepSeekBalanceError.value = null
+            _deepSeekBalanceUpdatedAt.value = null
+            return
+        }
+        val generation = ++deepSeekBalanceRequestGeneration
+        viewModelScope.launch {
+            _deepSeekBalanceRefreshing.value = true
+            _deepSeekBalanceError.value = null
+            try {
+                val balance = deepSeekClient.getBalance(apiKey)
+                if (generation == deepSeekBalanceRequestGeneration) {
+                    _deepSeekBalance.value = balance
+                    _deepSeekBalanceUpdatedAt.value = System.currentTimeMillis()
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                if (generation == deepSeekBalanceRequestGeneration) {
+                    _deepSeekBalanceError.value =
+                        error.message ?: "Could not load the DeepSeek balance."
+                }
+            } finally {
+                if (generation == deepSeekBalanceRequestGeneration) {
+                    _deepSeekBalanceRefreshing.value = false
+                }
+            }
+        }
     }
 
     fun consumeError() {

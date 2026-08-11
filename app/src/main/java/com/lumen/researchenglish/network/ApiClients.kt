@@ -16,7 +16,51 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 
+data class DeepSeekBalanceInfo(
+    val currency: String,
+    val totalBalance: String,
+    val grantedBalance: String,
+    val toppedUpBalance: String,
+)
+
+data class DeepSeekBalance(
+    val isAvailable: Boolean,
+    val balances: List<DeepSeekBalanceInfo>,
+)
+
 class DeepSeekClient(private val client: OkHttpClient = OkHttpClient()) {
+    suspend fun getBalance(apiKey: String): DeepSeekBalance = withContext(Dispatchers.IO) {
+        require(apiKey.isNotBlank()) { "Please add a new DeepSeek API key in Settings." }
+        val request = Request.Builder()
+            .url("https://api.deepseek.com/user/balance")
+            .header("Authorization", "Bearer $apiKey")
+            .header("Accept", "application/json")
+            .get()
+            .build()
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw IllegalStateException(
+                    parseApiError(body, "DeepSeek balance request failed (${response.code})."),
+                )
+            }
+            val json = JSONObject(body)
+            val balanceInfos = json.optJSONArray("balance_infos") ?: JSONArray()
+            DeepSeekBalance(
+                isAvailable = json.optBoolean("is_available", false),
+                balances = List(balanceInfos.length()) { index ->
+                    val balance = balanceInfos.optJSONObject(index) ?: JSONObject()
+                    DeepSeekBalanceInfo(
+                        currency = balance.optString("currency"),
+                        totalBalance = balance.optString("total_balance"),
+                        grantedBalance = balance.optString("granted_balance"),
+                        toppedUpBalance = balance.optString("topped_up_balance"),
+                    )
+                },
+            )
+        }
+    }
+
     suspend fun chatStream(
         apiKey: String,
         memory: String,

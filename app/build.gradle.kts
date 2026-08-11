@@ -14,8 +14,8 @@ android {
         applicationId = "com.lumen.researchenglish"
         minSdk = 28
         targetSdk = 35
-        versionCode = 18
-        versionName = "1.4.0"
+        versionCode = 20
+        versionName = "1.4.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -36,6 +36,8 @@ android {
         }
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("lumenDebug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

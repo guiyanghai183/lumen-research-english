@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -84,6 +85,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -1198,11 +1200,24 @@ private fun ReaderTutorConversation(
 ) {
     var draft by remember(selection) { mutableStateOf("") }
     val listState = rememberLazyListState()
-    val visibleMessageCount = messages.size + if (streaming) 1 else 0
+    var followLatest by remember(selection) { mutableStateOf(true) }
+    val visibleMessageCount = messages.size +
+        (if (streaming) 1 else 0) +
+        (if (error != null) 1 else 0)
 
-    LaunchedEffect(visibleMessageCount, streamingReply.length) {
-        if (visibleMessageCount > 0) {
-            listState.scrollToItem(visibleMessageCount - 1)
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
+            .collect { (scrolling, hasNewerContent) ->
+                when {
+                    !hasNewerContent -> followLatest = true
+                    scrolling -> followLatest = false
+                }
+            }
+    }
+
+    LaunchedEffect(visibleMessageCount, streamingReply.length / 80) {
+        if (followLatest && visibleMessageCount > 0) {
+            listState.animateScrollToItem(visibleMessageCount - 1)
         }
     }
 
@@ -1253,42 +1268,55 @@ private fun ReaderTutorConversation(
             }
         }
 
-        LazyColumn(
-            state = listState,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+        Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .heightIn(min = 120.dp),
         ) {
-            items(messages, key = ReaderTutorMessage::id) { message ->
-                ReaderTutorBubble(message.role, message.content)
-            }
-            if (streaming) {
-                item(key = "streaming-reader-tutor") {
-                    ReaderTutorBubble(
-                        role = "assistant",
-                        content = streamingReply.ifBlank { "Tutor is reading the passage…" } +
-                            if (streamingReply.isBlank()) "" else " ▍",
-                    )
+            LazyColumn(
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(end = 78.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(messages, key = ReaderTutorMessage::id) { message ->
+                    ReaderTutorBubble(message.role, message.content)
                 }
-            }
-            error?.let { message ->
-                item(key = "reader-tutor-error") {
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            message,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(12.dp),
+                if (streaming) {
+                    item(key = "streaming-reader-tutor") {
+                        ReaderTutorBubble(
+                            role = "assistant",
+                            content = streamingReply.ifBlank { "Tutor is reading the passage…" } +
+                                if (streamingReply.isBlank()) "" else " ▍",
                         )
                     }
                 }
+                error?.let { message ->
+                    item(key = "reader-tutor-error") {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                message,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(12.dp),
+                            )
+                        }
+                    }
+                }
             }
+            ConversationPagingControls(
+                listState = listState,
+                onPagingAwayFromLatest = { followLatest = false },
+                onReturnToLatest = { followLatest = true },
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 4.dp),
+            )
         }
 
         OutlinedTextField(
@@ -1303,6 +1331,7 @@ private fun ReaderTutorConversation(
                     onClick = {
                         val message = draft.trim()
                         draft = ""
+                        followLatest = true
                         onSend(message)
                     },
                 ) {
@@ -1319,6 +1348,7 @@ private fun ReaderTutorConversation(
                     val message = draft.trim()
                     if (message.isNotBlank() && !streaming) {
                         draft = ""
+                        followLatest = true
                         onSend(message)
                     }
                 },
