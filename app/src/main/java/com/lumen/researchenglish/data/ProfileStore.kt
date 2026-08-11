@@ -1,6 +1,9 @@
 package com.lumen.researchenglish.data
 
 import android.content.Context
+import com.lumen.researchenglish.domain.DailyCheckIn
+import com.lumen.researchenglish.domain.DailyCheckInStats
+import java.time.LocalDate
 
 class ProfileStore(context: Context) {
     private val preferences = context.getSharedPreferences("lumen_profile", Context.MODE_PRIVATE)
@@ -85,6 +88,20 @@ class ProfileStore(context: Context) {
         preferences.edit().putBoolean("$BOOK_COMPLETED_PREFIX$documentId", true).apply()
     }
 
+    fun getDailyCheckInStats(today: LocalDate = LocalDate.now()): DailyCheckInStats =
+        DailyCheckIn.stats(getCheckInDates(), today)
+
+    /** Returns true only when a new date was added. */
+    @Synchronized
+    fun checkIn(today: LocalDate = LocalDate.now()): Boolean {
+        val dates = getCheckInDates().toMutableSet()
+        if (!dates.add(today)) return false
+        preferences.edit()
+            .putStringSet(CHECK_IN_DATES, dates.map(LocalDate::toString).toSet())
+            .apply()
+        return true
+    }
+
     fun getChatHistoryLimit(): Int =
         preferences.getInt(CHAT_HISTORY_LIMIT, DEFAULT_CHAT_HISTORY_LIMIT).coerceIn(1, 30)
 
@@ -108,6 +125,12 @@ class ProfileStore(context: Context) {
         preferences.edit().putString(CURRENT_CHAT_SESSION, id).apply()
     }
 
+    private fun getCheckInDates(): Set<LocalDate> =
+        preferences.getStringSet(CHECK_IN_DATES, emptySet())
+            .orEmpty()
+            .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }
+            .toSet()
+
     companion object {
         const val DEFAULT_VOICE_TYPE = 502004
         const val DEFAULT_UPDATE_SOURCE = "https://github.com/guiyanghai183/lumen-research-english"
@@ -125,6 +148,7 @@ class ProfileStore(context: Context) {
         private const val LEARNING_XP = "learning_xp"
         private const val HIGHEST_READ_PAGE_PREFIX = "highest_read_page_"
         private const val BOOK_COMPLETED_PREFIX = "book_completed_"
+        private const val CHECK_IN_DATES = "daily_check_in_dates"
         private const val CHAT_HISTORY_LIMIT = "chat_history_limit"
         private const val MEMORY_UPDATE_FREQUENCY = "memory_update_frequency"
         private const val CURRENT_CHAT_SESSION = "current_chat_session"

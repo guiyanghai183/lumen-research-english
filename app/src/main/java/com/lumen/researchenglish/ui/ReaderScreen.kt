@@ -5,11 +5,13 @@ import android.content.Context
 import android.content.ContextWrapper
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,19 +20,32 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.AddCircleOutline
+import androidx.compose.material.icons.outlined.Bookmark
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Bookmarks
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -38,22 +53,27 @@ import androidx.compose.material.icons.outlined.FormatColorFill
 import androidx.compose.material.icons.outlined.FormatUnderlined
 import androidx.compose.material.icons.outlined.Headphones
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material.icons.outlined.Translate
-import androidx.compose.material.icons.outlined.VolumeUp
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -77,6 +97,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -85,6 +106,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lumen.researchenglish.data.ReaderAnnotation
+import com.lumen.researchenglish.data.ReaderBookmark
 import com.lumen.researchenglish.data.RecognizedWord
 import com.lumen.researchenglish.ui.theme.Indigo
 import kotlin.math.abs
@@ -92,6 +114,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderScreen(
     documentId: String,
@@ -103,8 +126,14 @@ fun ReaderScreen(
     val page by viewModel.readerPage.collectAsStateWithLifecycle()
     val words by viewModel.recognizedWords.collectAsStateWithLifecycle()
     val annotations by viewModel.readerAnnotations.collectAsStateWithLifecycle()
+    val bookmarks by viewModel.readerBookmarks.collectAsStateWithLifecycle()
     val selectionBusy by viewModel.selectionBusy.collectAsStateWithLifecycle()
     val translation by viewModel.translation.collectAsStateWithLifecycle()
+    val tutorSelection by viewModel.readerTutorSelection.collectAsStateWithLifecycle()
+    val tutorMessages by viewModel.readerTutorMessages.collectAsStateWithLifecycle()
+    val tutorStreamingReply by viewModel.readerTutorStreamingReply.collectAsStateWithLifecycle()
+    val tutorStreaming by viewModel.readerTutorStreaming.collectAsStateWithLifecycle()
+    val tutorError by viewModel.readerTutorError.collectAsStateWithLifecycle()
     val readerMode by viewModel.readerMode.collectAsStateWithLifecycle()
     val speechLoadingId by viewModel.speechLoadingId.collectAsStateWithLifecycle()
     val speakingId by viewModel.speakingId.collectAsStateWithLifecycle()
@@ -119,6 +148,9 @@ fun ReaderScreen(
     var offsetY by remember(page) { mutableFloatStateOf(0f) }
     var controlsVisible by remember(page) { mutableStateOf(false) }
     var showColorMenu by remember { mutableStateOf(false) }
+    var showBookmarkMenu by remember { mutableStateOf(false) }
+    var showTutorSheet by remember(page) { mutableStateOf(false) }
+    val tutorSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val context = LocalContext.current
     val view = LocalView.current
@@ -130,6 +162,7 @@ fun ReaderScreen(
         controller?.hide(WindowInsetsCompat.Type.systemBars())
         onDispose {
             controller?.show(WindowInsetsCompat.Type.systemBars())
+            viewModel.closeReaderTutor()
             viewModel.stopSpeech()
         }
     }
@@ -146,6 +179,8 @@ fun ReaderScreen(
     val selectionSpeaking = speechLoadingId == speechRequestId || speakingId == speechRequestId
 
     fun closeSelection() {
+        showTutorSheet = false
+        viewModel.closeReaderTutor()
         selectedWords = emptyList()
         selectedSource = ""
         lineMode = false
@@ -278,6 +313,8 @@ fun ReaderScreen(
                 translationExpanded = translationExpanded,
                 selectionSpeaking = selectionSpeaking,
                 onWordLongPress = { word ->
+                    showTutorSheet = false
+                    viewModel.closeReaderTutor()
                     selectedWords = listOf(word)
                     selectedSource = word.text
                     lineMode = false
@@ -286,6 +323,8 @@ fun ReaderScreen(
                 },
                 onWordTap = { word ->
                     if (selectedWords.isNotEmpty()) {
+                        showTutorSheet = false
+                        viewModel.closeReaderTutor()
                         val firstIndex = words.indexOf(selectedWords.first()).coerceAtLeast(0)
                         val tappedIndex = words.indexOf(word).coerceAtLeast(0)
                         val from = min(firstIndex, tappedIndex)
@@ -298,6 +337,8 @@ fun ReaderScreen(
                 },
                 onToggleLine = {
                     val anchor = selectedWords.firstOrNull() ?: return@PositionAwareSelectionLayer
+                    showTutorSheet = false
+                    viewModel.closeReaderTutor()
                     lineMode = !lineMode
                     selectedWords = if (lineMode) {
                         words.filter {
@@ -308,6 +349,22 @@ fun ReaderScreen(
                     }
                     selectedSource = selectedWords.joinToString(" ") { it.text }
                     translationExpanded = false
+                },
+                onSelectionEdgeDrag = { movingStart, word ->
+                    val fixedWord = if (movingStart) selectedWords.lastOrNull()
+                    else selectedWords.firstOrNull()
+                    if (fixedWord != null) {
+                        val movingIndex = words.indexOf(word).coerceAtLeast(0)
+                        val fixedIndex = words.indexOf(fixedWord).coerceAtLeast(0)
+                        val from = min(movingIndex, fixedIndex)
+                        val to = max(movingIndex, fixedIndex)
+                        selectedWords = words.subList(from, to + 1)
+                        selectedSource = selectedWords.joinToString(" ") { it.text }
+                        lineMode = false
+                        translationExpanded = false
+                        showTutorSheet = false
+                        viewModel.closeReaderTutor()
+                    }
                 },
                 onHighlight = { color ->
                     viewModel.addReaderAnnotation("highlight", color, selectedSource, selectedWords)
@@ -325,6 +382,15 @@ fun ReaderScreen(
                     translationExpanded = true
                     viewModel.translateSelection(selectedSource)
                 },
+                onAskTutor = {
+                    showTutorSheet = true
+                    if (
+                        tutorSelection != selectedSource ||
+                        (tutorMessages.isEmpty() && !tutorStreaming)
+                    ) {
+                        viewModel.askReaderTutor(selectedSource)
+                    }
+                },
                 onSpeak = { viewModel.speak(selectedSource, speechRequestId) },
                 onSave = { viewModel.saveSelection(selectedSource, translation) },
                 onClose = ::closeSelection,
@@ -338,9 +404,21 @@ fun ReaderScreen(
                 pageCount = document?.pageCount ?: 0,
                 readerMode = readerMode,
                 showColorMenu = showColorMenu,
+                bookmarks = bookmarks,
+                currentPageBookmarked = bookmarks.any { it.page == page },
+                showBookmarkMenu = showBookmarkMenu,
                 onBack = onBack,
                 onToggleColorMenu = { showColorMenu = !showColorMenu },
                 onDismissColorMenu = { showColorMenu = false },
+                onToggleBookmarkMenu = { showBookmarkMenu = !showBookmarkMenu },
+                onDismissBookmarkMenu = { showBookmarkMenu = false },
+                onToggleCurrentBookmark = viewModel::toggleCurrentBookmark,
+                onOpenBookmark = { bookmarkPage ->
+                    showBookmarkMenu = false
+                    controlsVisible = false
+                    closeSelection()
+                    viewModel.openBookmark(bookmarkPage)
+                },
                 onReaderMode = {
                     viewModel.setReaderMode(it)
                     showColorMenu = false
@@ -385,6 +463,23 @@ fun ReaderScreen(
             }
         }
     }
+
+    if (showTutorSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showTutorSheet = false },
+            sheetState = tutorSheetState,
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
+            ReaderTutorConversation(
+                selection = tutorSelection.ifBlank { selectedSource },
+                messages = tutorMessages,
+                streamingReply = tutorStreamingReply,
+                streaming = tutorStreaming,
+                error = tutorError,
+                onSend = viewModel::sendReaderTutorFollowUp,
+            )
+        }
+    }
 }
 
 @Composable
@@ -394,9 +489,16 @@ private fun ReaderTopBar(
     pageCount: Int,
     readerMode: String,
     showColorMenu: Boolean,
+    bookmarks: List<ReaderBookmark>,
+    currentPageBookmarked: Boolean,
+    showBookmarkMenu: Boolean,
     onBack: () -> Unit,
     onToggleColorMenu: () -> Unit,
     onDismissColorMenu: () -> Unit,
+    onToggleBookmarkMenu: () -> Unit,
+    onDismissBookmarkMenu: () -> Unit,
+    onToggleCurrentBookmark: () -> Unit,
+    onOpenBookmark: (Int) -> Unit,
     onReaderMode: (String) -> Unit,
     audiobookActive: Boolean,
     onToggleAudiobook: () -> Unit,
@@ -428,6 +530,66 @@ private fun ReaderTopBar(
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.labelSmall,
             )
+        }
+        Box {
+            IconButton(onClick = onToggleBookmarkMenu) {
+                Icon(
+                    if (currentPageBookmarked) Icons.Outlined.Bookmark
+                    else Icons.Outlined.BookmarkBorder,
+                    if (currentPageBookmarked) "Manage page bookmark" else "Bookmark this page",
+                    tint = if (currentPageBookmarked) Color(0xFFFFD56A) else Color.White,
+                )
+            }
+            DropdownMenu(
+                expanded = showBookmarkMenu,
+                onDismissRequest = onDismissBookmarkMenu,
+            ) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            if (currentPageBookmarked) "Remove bookmark from page ${page + 1}"
+                            else "Bookmark page ${page + 1}",
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            if (currentPageBookmarked) Icons.Outlined.Bookmark
+                            else Icons.Outlined.BookmarkBorder,
+                            contentDescription = null,
+                        )
+                    },
+                    onClick = onToggleCurrentBookmark,
+                )
+                HorizontalDivider()
+                if (bookmarks.isEmpty()) {
+                    Text(
+                        "No bookmarked pages yet",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    )
+                } else {
+                    Text(
+                        "Bookmarked pages",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                    bookmarks.forEach { bookmark ->
+                        DropdownMenuItem(
+                            text = { Text("Page ${bookmark.page + 1}") },
+                            leadingIcon = {
+                                if (bookmark.page == page) {
+                                    Icon(Icons.Outlined.Check, contentDescription = null)
+                                } else {
+                                    Icon(Icons.Outlined.Bookmarks, contentDescription = null)
+                                }
+                            },
+                            onClick = { onOpenBookmark(bookmark.page) },
+                        )
+                    }
+                }
+            }
         }
         IconButton(onClick = onToggleAudiobook) {
             Icon(
@@ -572,11 +734,13 @@ private fun PositionAwareSelectionLayer(
     onWordLongPress: (RecognizedWord) -> Unit,
     onWordTap: (RecognizedWord) -> Unit,
     onToggleLine: () -> Unit,
+    onSelectionEdgeDrag: (Boolean, RecognizedWord) -> Unit,
     onHighlight: (String) -> Unit,
     onRemoveHighlight: () -> Unit,
     onUnderline: (String) -> Unit,
     onRemoveUnderline: () -> Unit,
     onTranslate: () -> Unit,
+    onAskTutor: () -> Unit,
     onSpeak: () -> Unit,
     onSave: () -> Unit,
     onClose: () -> Unit,
@@ -591,7 +755,19 @@ private fun PositionAwareSelectionLayer(
         offsetX,
         offsetY,
     )
-    val touchPadding = with(density) { 3.dp.toPx() } * scale
+    val touchPadding = with(density) { 4.dp.toPx() } * scale
+
+    fun closestWord(x: Float, y: Float): RecognizedWord? = words.minByOrNull { word ->
+        val centerX = metrics.x(
+            metrics.pageLeft + ((word.left + word.right) / 2f) * metrics.shownWidth,
+        )
+        val centerY = metrics.y(
+            metrics.pageTop + ((word.top + word.bottom) / 2f) * metrics.shownHeight,
+        )
+        val dx = centerX - x
+        val dy = centerY - y
+        dx * dx + dy * dy
+    }
 
     Box(Modifier.fillMaxSize()) {
         words.forEach { word ->
@@ -599,6 +775,7 @@ private fun PositionAwareSelectionLayer(
             val top = metrics.y(metrics.pageTop + word.top * metrics.shownHeight) - touchPadding
             val right = metrics.x(metrics.pageLeft + word.right * metrics.shownWidth) + touchPadding
             val bottom = metrics.y(metrics.pageTop + word.bottom * metrics.shownHeight) + touchPadding
+            val selected = word in selectedWords
             Box(
                 modifier = Modifier
                     .offset { IntOffset(left.roundToInt(), top.roundToInt()) }
@@ -606,10 +783,21 @@ private fun PositionAwareSelectionLayer(
                         width = with(density) { (right - left).coerceAtLeast(1f).toDp() },
                         height = with(density) { (bottom - top).coerceAtLeast(1f).toDp() },
                     )
-                    .clip(RoundedCornerShape(3.dp))
+                    .clip(RoundedCornerShape(4.dp))
                     .background(
-                        if (word in selectedWords) Indigo.copy(alpha = 0.28f)
+                        if (selected) Indigo.copy(alpha = 0.24f)
                         else Color.Transparent,
+                    )
+                    .then(
+                        if (selected) {
+                            Modifier.border(
+                                width = 0.75.dp,
+                                color = Indigo.copy(alpha = 0.55f),
+                                shape = RoundedCornerShape(4.dp),
+                            )
+                        } else {
+                            Modifier
+                        },
                     )
                     .pointerInput(word, selectedWords) {
                         detectTapGestures(
@@ -620,13 +808,28 @@ private fun PositionAwareSelectionLayer(
             )
         }
 
+        selectedWords.firstOrNull()?.let { first ->
+            SelectionHandle(
+                x = metrics.x(metrics.pageLeft + first.left * metrics.shownWidth),
+                y = metrics.y(metrics.pageTop + first.bottom * metrics.shownHeight),
+                onDrag = { x, y -> closestWord(x, y)?.let { onSelectionEdgeDrag(true, it) } },
+            )
+        }
+        selectedWords.lastOrNull()?.let { last ->
+            SelectionHandle(
+                x = metrics.x(metrics.pageLeft + last.right * metrics.shownWidth),
+                y = metrics.y(metrics.pageTop + last.bottom * metrics.shownHeight),
+                onDrag = { x, y -> closestWord(x, y)?.let { onSelectionEdgeDrag(false, it) } },
+            )
+        }
+
         if (selectedWords.isNotEmpty() && selectedSource.isNotBlank()) {
             val panelWidthPx = min(
                 with(density) { 360.dp.toPx() },
                 containerWidthPx - with(density) { 20.dp.toPx() },
             ).coerceAtLeast(with(density) { 250.dp.toPx() })
             val estimatedPanelHeight = with(density) {
-                (if (translationExpanded) 230.dp else 132.dp).toPx()
+                (if (translationExpanded) 292.dp else 166.dp).toPx()
             }
             val horizontalMargin = with(density) { 10.dp.toPx() }
             val verticalMargin = with(density) { 10.dp.toPx() }
@@ -671,6 +874,7 @@ private fun PositionAwareSelectionLayer(
                 onUnderline = onUnderline,
                 onRemoveUnderline = onRemoveUnderline,
                 onTranslate = onTranslate,
+                onAskTutor = onAskTutor,
                 onSpeak = onSpeak,
                 onSave = onSave,
                 onClose = onClose,
@@ -695,6 +899,7 @@ private fun SelectionActionCard(
     onUnderline: (String) -> Unit,
     onRemoveUnderline: () -> Unit,
     onTranslate: () -> Unit,
+    onAskTutor: () -> Unit,
     onSpeak: () -> Unit,
     onSave: () -> Unit,
     onClose: () -> Unit,
@@ -702,32 +907,51 @@ private fun SelectionActionCard(
 ) {
     Card(
         modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 14.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF9F8FC)),
+        shape = RoundedCornerShape(24.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
-        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 4.dp, height = 34.dp)
+                        .clip(CircleShape)
+                        .background(Indigo),
+                )
+                Spacer(Modifier.width(10.dp))
                 Text(
                     source,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = if (lineMode) 3 else 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
-                        .weight(1f)
-                        .padding(start = 8.dp),
+                        .weight(1f),
                 )
-                TextButton(onClick = onToggleLine) {
-                    Text(if (lineMode) "Word" else "Line")
+                Surface(
+                    color = Indigo.copy(alpha = 0.1f),
+                    shape = CircleShape,
+                    modifier = Modifier.clickable(onClick = onToggleLine),
+                ) {
+                    Text(
+                        if (lineMode) "Word" else "Line",
+                        color = Indigo,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                    )
                 }
+                Spacer(Modifier.width(2.dp))
                 IconButton(onClick = onClose, modifier = Modifier.size(34.dp)) {
                     Icon(Icons.Outlined.Close, "Close selection")
                 }
             }
 
             Row(
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(top = 5.dp),
             ) {
                 AnnotationStyleTool(
                     icon = Icons.Outlined.FormatColorFill,
@@ -743,9 +967,15 @@ private fun SelectionActionCard(
                     onColor = onUnderline,
                     onRemove = onRemoveUnderline,
                 )
+                SelectionTool(
+                    Icons.Outlined.School,
+                    "Ask Tutor",
+                    onAskTutor,
+                    emphasized = true,
+                )
                 SelectionTool(Icons.Outlined.Translate, "Translate", onTranslate)
                 SelectionTool(
-                    Icons.Outlined.VolumeUp,
+                    Icons.AutoMirrored.Outlined.VolumeUp,
                     if (selectionSpeaking) "Stop" else "Read",
                     onSpeak,
                     active = selectionSpeaking,
@@ -753,19 +983,27 @@ private fun SelectionActionCard(
             }
 
             if (translationExpanded) {
-                Text(
-                    text = translation.ifBlank { "Translating…" },
-                    color = Color(0xFF4D4A55),
-                    maxLines = 5,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-                )
+                Surface(
+                    color = Indigo.copy(alpha = 0.07f),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                ) {
+                    Text(
+                        text = translation.ifBlank { "Translating…" },
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 6,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
+                    )
+                }
                 Row(
                     horizontalArrangement = Arrangement.End,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Button(onClick = onSave, enabled = translation.isNotBlank()) {
+                    FilledTonalButton(onClick = onSave, enabled = translation.isNotBlank()) {
                         Icon(
                             Icons.Outlined.AddCircleOutline,
                             contentDescription = null,
@@ -798,7 +1036,7 @@ private fun AnnotationStyleTool(
             Text(
                 "Choose a color",
                 style = MaterialTheme.typography.labelMedium,
-                color = Color(0xFF5C5963),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             )
             Row(
@@ -837,22 +1075,241 @@ private fun SelectionTool(
     label: String,
     onClick: () -> Unit,
     active: Boolean = false,
+    emphasized: Boolean = false,
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .background(if (active) Indigo.copy(alpha = 0.12f) else Color.Transparent)
-            .padding(horizontal = 7.dp, vertical = 6.dp),
+            .background(
+                when {
+                    active -> Indigo.copy(alpha = 0.16f)
+                    emphasized -> Indigo.copy(alpha = 0.1f)
+                    else -> Color.Transparent
+                },
+            )
+            .padding(horizontal = 9.dp, vertical = 7.dp),
     ) {
         Icon(
             icon,
             contentDescription = label,
-            tint = if (active) Indigo else Color(0xFF3E3B45),
+            tint = if (active || emphasized) Indigo else MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.size(21.dp),
         )
         Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+    }
+}
+
+@Composable
+private fun SelectionHandle(
+    x: Float,
+    y: Float,
+    onDrag: (Float, Float) -> Unit,
+) {
+    val density = LocalDensity.current
+    val handleSize = 12.dp
+    val radiusPx = with(density) { handleSize.toPx() / 2f }
+    var dragX by remember(x) { mutableFloatStateOf(x) }
+    var dragY by remember(y) { mutableFloatStateOf(y) }
+    Box(
+        modifier = Modifier
+            .offset {
+                IntOffset(
+                    (x - radiusPx).roundToInt(),
+                    (y - radiusPx).roundToInt(),
+                )
+            }
+            .size(handleSize)
+            .border(2.dp, Color.White, CircleShape)
+            .background(Indigo, CircleShape)
+            .pointerInput(x, y) {
+                detectDragGestures(
+                    onDragStart = {
+                        dragX = x
+                        dragY = y
+                    },
+                    onDragEnd = { onDrag(dragX, dragY) },
+                    onDrag = { change, amount ->
+                        change.consume()
+                        dragX += amount.x
+                        dragY += amount.y
+                    },
+                )
+            },
+    )
+}
+
+@Composable
+private fun ReaderTutorConversation(
+    selection: String,
+    messages: List<ReaderTutorMessage>,
+    streamingReply: String,
+    streaming: Boolean,
+    error: String?,
+    onSend: (String) -> Unit,
+) {
+    var draft by remember(selection) { mutableStateOf("") }
+    val listState = rememberLazyListState()
+    val visibleMessageCount = messages.size + if (streaming) 1 else 0
+
+    LaunchedEffect(visibleMessageCount, streamingReply.length) {
+        if (visibleMessageCount > 0) {
+            listState.scrollToItem(visibleMessageCount - 1)
+        }
+    }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.84f)
+            .imePadding()
+            .padding(start = 18.dp, end = 18.dp, bottom = 14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TutorAvatar(size = 44.dp)
+            Spacer(Modifier.width(11.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Tutor note",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    "Ask follow-up questions without leaving the reader",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
+        Surface(
+            color = Indigo.copy(alpha = 0.08f),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
+                Text(
+                    "Selected passage",
+                    color = Indigo,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.size(4.dp))
+                Text(
+                    selection,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+
+        LazyColumn(
+            state = listState,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .heightIn(min = 120.dp),
+        ) {
+            items(messages, key = ReaderTutorMessage::id) { message ->
+                ReaderTutorBubble(message.role, message.content)
+            }
+            if (streaming) {
+                item(key = "streaming-reader-tutor") {
+                    ReaderTutorBubble(
+                        role = "assistant",
+                        content = streamingReply.ifBlank { "Tutor is reading the passage…" } +
+                            if (streamingReply.isBlank()) "" else " ▍",
+                    )
+                }
+            }
+            error?.let { message ->
+                item(key = "reader-tutor-error") {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            message,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(12.dp),
+                        )
+                    }
+                }
+            }
+        }
+
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            enabled = !streaming,
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("Ask about meaning, grammar, or research usage…") },
+            trailingIcon = {
+                IconButton(
+                    enabled = draft.isNotBlank() && !streaming,
+                    onClick = {
+                        val message = draft.trim()
+                        draft = ""
+                        onSend(message)
+                    },
+                ) {
+                    if (streaming) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = "Send follow-up")
+                    }
+                }
+            },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(
+                onSend = {
+                    val message = draft.trim()
+                    if (message.isNotBlank() && !streaming) {
+                        draft = ""
+                        onSend(message)
+                    }
+                },
+            ),
+            maxLines = 4,
+            shape = RoundedCornerShape(18.dp),
+        )
+    }
+}
+
+@Composable
+private fun ReaderTutorBubble(role: String, content: String) {
+    val isUser = role == "user"
+    Row(
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        if (!isUser) {
+            TutorAvatar(size = 30.dp)
+            Spacer(Modifier.width(7.dp))
+        }
+        Surface(
+            color = if (isUser) Indigo else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+            shape = RoundedCornerShape(
+                topStart = if (isUser) 18.dp else 5.dp,
+                topEnd = if (isUser) 5.dp else 18.dp,
+                bottomStart = 18.dp,
+                bottomEnd = 18.dp,
+            ),
+            modifier = Modifier.fillMaxWidth(0.86f),
+        ) {
+            Text(
+                content,
+                color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface,
+                lineHeight = MaterialTheme.typography.bodyMedium.lineHeight,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+            )
+        }
     }
 }
 

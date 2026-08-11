@@ -22,6 +22,7 @@ class DeepSeekClient(private val client: OkHttpClient = OkHttpClient()) {
         memory: String,
         history: List<ChatMessageEntity>,
         userMessage: String,
+        systemInstruction: String = DEFAULT_TUTOR_INSTRUCTION,
         onChunk: (String) -> Unit,
     ): String = withContext(Dispatchers.IO) {
         require(apiKey.isNotBlank()) { "Please add a new DeepSeek API key in Settings." }
@@ -32,8 +33,7 @@ class DeepSeekClient(private val client: OkHttpClient = OkHttpClient()) {
                     .put(
                         "content",
                         """
-                        You are Lumen, a patient research-English tutor.
-                        Speak mainly in English. Answer first, then briefly correct only important English errors.
+                        $systemInstruction
                         Never claim that the memory file says something it does not say.
 
                         Editable user memory:
@@ -91,6 +91,12 @@ class DeepSeekClient(private val client: OkHttpClient = OkHttpClient()) {
             }
             answer.toString().trim()
         }
+    }
+
+    companion object {
+        private const val DEFAULT_TUTOR_INSTRUCTION =
+            "You are Lumen, a patient research-English tutor. " +
+                "Speak mainly in English. Answer first, then briefly correct only important English errors."
     }
 
     suspend fun summarizeMemory(

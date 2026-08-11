@@ -63,7 +63,7 @@ import com.lumen.researchenglish.ui.theme.Indigo
 private const val BAIR_ARCHIVE_URL = "https://bair.berkeley.edu/blog/archive/"
 private const val BAIR_HOST = "bair.berkeley.edu"
 
-@SuppressLint("SetJavaScriptEnabled")
+@SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
 @Composable
 fun BairScreen(viewModel: AppViewModel) {
     val context = LocalContext.current

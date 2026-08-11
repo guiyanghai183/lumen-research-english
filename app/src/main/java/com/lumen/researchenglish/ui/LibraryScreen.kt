@@ -26,10 +26,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AutoStories
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.LocalFireDepartment
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -38,6 +42,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -47,13 +52,15 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
@@ -67,6 +74,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lumen.researchenglish.data.DocumentEntity
 import com.lumen.researchenglish.data.GutenbergBook
+import com.lumen.researchenglish.domain.DailyCheckInStats
 import com.lumen.researchenglish.ui.theme.Indigo
 import com.lumen.researchenglish.ui.theme.SoftIndigo
 import kotlinx.coroutines.Dispatchers
@@ -81,6 +89,7 @@ fun LibraryScreen(
     val gutenbergResults by viewModel.gutenbergResults.collectAsStateWithLifecycle()
     val gutenbergLoading by viewModel.gutenbergLoading.collectAsStateWithLifecycle()
     val gutenbergStatus by viewModel.gutenbergStatus.collectAsStateWithLifecycle()
+    val dailyCheckIn by viewModel.dailyCheckIn.collectAsStateWithLifecycle()
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
     var pendingDelete by remember { mutableStateOf<DocumentEntity?>(null) }
     var searchQuery by remember { mutableStateOf("") }
@@ -187,6 +196,13 @@ fun LibraryScreen(
         }
 
         item {
+            DailyCheckInCard(
+                stats = dailyCheckIn,
+                onCheckIn = viewModel::checkInToday,
+            )
+        }
+
+        item {
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
@@ -256,6 +272,111 @@ fun LibraryScreen(
                 documents = papers,
                 onOpenDocument = onOpenDocument,
                 onDeleteDocument = { pendingDelete = it },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DailyCheckInCard(
+    stats: DailyCheckInStats,
+    onCheckIn: () -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.padding(20.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.86f)),
+                ) {
+                    Icon(
+                        if (stats.checkedInToday) Icons.Outlined.CheckCircle
+                        else Icons.Outlined.CalendarMonth,
+                        contentDescription = null,
+                        tint = if (stats.checkedInToday) Color(0xFF197A4A) else Indigo,
+                    )
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (stats.checkedInToday) "Checked in for today" else "Daily check-in",
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        if (stats.checkedInToday) {
+                            "Nice work — come back tomorrow to keep the streak going."
+                        } else {
+                            "Build a steady reading habit and earn 10 XP."
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                CheckInMetric(
+                    icon = Icons.Outlined.LocalFireDepartment,
+                    value = stats.currentStreak.toString(),
+                    label = "day streak",
+                    modifier = Modifier.weight(1f),
+                )
+                CheckInMetric(
+                    icon = Icons.Outlined.CalendarMonth,
+                    value = stats.totalDays.toString(),
+                    label = "days total",
+                    modifier = Modifier.weight(1f),
+                )
+                FilledTonalButton(
+                    onClick = onCheckIn,
+                    enabled = !stats.checkedInToday,
+                ) {
+                    Text(if (stats.checkedInToday) "Done" else "Check in")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CheckInMetric(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = Color(0xFFE46B2B),
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Column {
+            Text(value, fontWeight = FontWeight.Bold)
+            Text(
+                label,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
             )
         }
     }
@@ -402,8 +523,9 @@ private fun DocumentCard(
             shape = RoundedCornerShape(14.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
         ) {
-            val cover by produceState<Bitmap?>(initialValue = null, key1 = document.coverPath) {
-                value = withContext(Dispatchers.IO) {
+            var cover by remember(document.coverPath) { mutableStateOf<Bitmap?>(null) }
+            LaunchedEffect(document.coverPath) {
+                cover = withContext(Dispatchers.IO) {
                     document.coverPath?.let(BitmapFactory::decodeFile)
                 }
             }

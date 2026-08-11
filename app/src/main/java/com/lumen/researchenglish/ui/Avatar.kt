@@ -12,8 +12,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,11 +54,9 @@ fun UserAvatar(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val bitmap by produceState<Bitmap?>(
-        initialValue = null,
-        key1 = uri,
-    ) {
-        value = if (uri.isBlank()) {
+    var bitmap by remember(uri) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(uri) {
+        bitmap = if (uri.isBlank()) {
             null
         } else {
             withContext(Dispatchers.IO) {
