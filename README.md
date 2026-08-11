@@ -2,15 +2,15 @@
 
 Lumen is a native Android app for research-English learning. It combines a PDF library and reader, public-domain books, vocabulary review, an English Tutor, and local learning progress.
 
-Current source version: **1.4.2** (`versionCode 20`).
+Current source version: **1.4.3** (`versionCode 21`).
 
 ## What is included
 
 - PDF and ebook Library with covers, reading progress, full-screen reading, page bookmarks, refined range selection, annotations, translation, and speech.
-- In-reader Tutor notes for selected passages, with clear Chinese explanations, follow-up chat, and page-by-page conversation navigation in the same reading view.
+- In-reader Tutor notes for selected passages, with clear Chinese explanations, wider replies, and reliable natural scrolling in the same reading view.
 - Local daily check-ins with current streak, longest streak, total days, and a once-per-day XP reward.
 - Project Gutenberg search and public-domain book importing.
-- English Tutor with streamed replies, user-controlled history navigation, editable `memory.md`, chat history, secure on-device API-setting storage, and DeepSeek balance display.
+- English Tutor with streamed replies, interruption-free history scrolling, editable `memory.md`, chat history, secure on-device API-setting storage, and DeepSeek balance display.
 - TOEFL, CET-4, and CET-6 vocabulary decks with Chinese definitions and spaced review.
 - Review dashboard with Due / Learning / Memory states, unlimited manual practice, predicted recall, and dinosaur learning progress.
 - In-app GitHub APK update download, integrity check, and Android system installation confirmation.

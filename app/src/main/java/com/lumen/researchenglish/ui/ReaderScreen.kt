@@ -15,11 +15,11 @@ import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -105,6 +105,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -1201,6 +1202,7 @@ private fun ReaderTutorConversation(
     var draft by remember(selection) { mutableStateOf("") }
     val listState = rememberLazyListState()
     var followLatest by remember(selection) { mutableStateOf(true) }
+    val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
     val visibleMessageCount = messages.size +
         (if (streaming) 1 else 0) +
         (if (error != null) 1 else 0)
@@ -1208,15 +1210,16 @@ private fun ReaderTutorConversation(
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
             .collect { (scrolling, hasNewerContent) ->
-                when {
-                    !hasNewerContent -> followLatest = true
-                    scrolling -> followLatest = false
-                }
+                if (!scrolling && !hasNewerContent) followLatest = true
             }
     }
 
+    LaunchedEffect(isUserDragging) {
+        if (isUserDragging) followLatest = false
+    }
+
     LaunchedEffect(visibleMessageCount, streamingReply.length / 80) {
-        if (followLatest && visibleMessageCount > 0) {
+        if (followLatest && !isUserDragging && visibleMessageCount > 0) {
             listState.animateScrollToItem(visibleMessageCount - 1)
         }
     }
@@ -1227,7 +1230,7 @@ private fun ReaderTutorConversation(
             .fillMaxWidth()
             .fillMaxHeight(0.84f)
             .imePadding()
-            .padding(start = 18.dp, end = 18.dp, bottom = 14.dp),
+            .padding(start = 12.dp, end = 12.dp, bottom = 14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TutorAvatar(size = 44.dp)
@@ -1268,55 +1271,42 @@ private fun ReaderTutorConversation(
             }
         }
 
-        Box(
+        LazyColumn(
+            state = listState,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .heightIn(min = 120.dp),
         ) {
-            LazyColumn(
-                state = listState,
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(end = 78.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(messages, key = ReaderTutorMessage::id) { message ->
-                    ReaderTutorBubble(message.role, message.content)
+            items(messages, key = ReaderTutorMessage::id) { message ->
+                ReaderTutorBubble(message.role, message.content)
+            }
+            if (streaming) {
+                item(key = "streaming-reader-tutor") {
+                    ReaderTutorBubble(
+                        role = "assistant",
+                        content = streamingReply.ifBlank { "Tutor is reading the passage…" } +
+                            if (streamingReply.isBlank()) "" else " ▍",
+                    )
                 }
-                if (streaming) {
-                    item(key = "streaming-reader-tutor") {
-                        ReaderTutorBubble(
-                            role = "assistant",
-                            content = streamingReply.ifBlank { "Tutor is reading the passage…" } +
-                                if (streamingReply.isBlank()) "" else " ▍",
+            }
+            error?.let { message ->
+                item(key = "reader-tutor-error") {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            message,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(12.dp),
                         )
                     }
                 }
-                error?.let { message ->
-                    item(key = "reader-tutor-error") {
-                        Surface(
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(
-                                message,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(12.dp),
-                            )
-                        }
-                    }
-                }
             }
-            ConversationPagingControls(
-                listState = listState,
-                onPagingAwayFromLatest = { followLatest = false },
-                onReturnToLatest = { followLatest = true },
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 4.dp),
-            )
         }
 
         OutlinedTextField(
@@ -1378,7 +1368,7 @@ private fun ReaderTutorBubble(role: String, content: String) {
                 bottomStart = 18.dp,
                 bottomEnd = 18.dp,
             ),
-            modifier = Modifier.fillMaxWidth(0.86f),
+            modifier = Modifier.fillMaxWidth(if (isUser) 0.88f else 0.96f),
         ) {
             Text(
                 text = if (isUser) {
@@ -1391,8 +1381,9 @@ private fun ReaderTutorBubble(role: String, content: String) {
                     )
                 },
                 color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface,
-                lineHeight = MaterialTheme.typography.bodyMedium.lineHeight,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+                fontSize = if (isUser) 14.sp else 13.sp,
+                lineHeight = if (isUser) 20.sp else 18.sp,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
             )
         }
     }

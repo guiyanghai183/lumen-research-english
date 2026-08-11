@@ -2,6 +2,7 @@ package com.lumen.researchenglish.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,6 +83,7 @@ fun ChatScreen(viewModel: AppViewModel) {
     var showHistory by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     var followLatest by remember { mutableStateOf(true) }
+    val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
 
     if (showHistory) {
         ChatHistoryDialog(
@@ -105,11 +107,12 @@ fun ChatScreen(viewModel: AppViewModel) {
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
             .collect { (scrolling, hasNewerContent) ->
-                when {
-                    !hasNewerContent -> followLatest = true
-                    scrolling -> followLatest = false
-                }
+                if (!scrolling && !hasNewerContent) followLatest = true
             }
+    }
+
+    LaunchedEffect(isUserDragging) {
+        if (isUserDragging) followLatest = false
     }
 
     LaunchedEffect(currentSessionId) {
@@ -118,7 +121,9 @@ fun ChatScreen(viewModel: AppViewModel) {
 
     LaunchedEffect(messages.size, streamingReply?.length?.div(80)) {
         val target = messages.size + if (streamingReply != null) 1 else 0
-        if (followLatest && target > 0) listState.animateScrollToItem(target - 1)
+        if (followLatest && !isUserDragging && target > 0) {
+            listState.animateScrollToItem(target - 1)
+        }
     }
 
     Column(
@@ -189,58 +194,46 @@ fun ChatScreen(viewModel: AppViewModel) {
         }
 
         Spacer(Modifier.height(12.dp))
-        Box(
+        LazyColumn(
+            state = listState,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 88.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (messages.isEmpty() && streamingReply == null) item { WelcomeMessage() }
-                items(messages, key = { it.id }) { message ->
-                    val speechId = "chat-${message.id}"
+            if (messages.isEmpty() && streamingReply == null) item { WelcomeMessage() }
+            items(messages, key = { it.id }) { message ->
+                val speechId = "chat-${message.id}"
+                MessageBubble(
+                    message = message,
+                    userAvatarUri = userAvatarUri,
+                    speechLoading = speechLoadingId == speechId,
+                    speaking = speakingId == speechId,
+                    speechProgress = if (speakingId == speechId) speechProgress else 0f,
+                    streaming = false,
+                    onSpeak = {
+                        viewModel.speak(tutorMarkdownPlainText(message.content), speechId)
+                    },
+                )
+            }
+            streamingReply?.let { reply ->
+                item(key = "streaming-reply") {
                     MessageBubble(
-                        message = message,
+                        message = ChatMessageEntity(
+                            id = "streaming-reply",
+                            role = "assistant",
+                            content = reply,
+                        ),
                         userAvatarUri = userAvatarUri,
-                        speechLoading = speechLoadingId == speechId,
-                        speaking = speakingId == speechId,
-                        speechProgress = if (speakingId == speechId) speechProgress else 0f,
-                        streaming = false,
-                        onSpeak = {
-                            viewModel.speak(tutorMarkdownPlainText(message.content), speechId)
-                        },
+                        speechLoading = false,
+                        speaking = false,
+                        speechProgress = 0f,
+                        streaming = true,
+                        onSpeak = {},
                     )
                 }
-                streamingReply?.let { reply ->
-                    item(key = "streaming-reply") {
-                        MessageBubble(
-                            message = ChatMessageEntity(
-                                id = "streaming-reply",
-                                role = "assistant",
-                                content = reply,
-                            ),
-                            userAvatarUri = userAvatarUri,
-                            speechLoading = false,
-                            speaking = false,
-                            speechProgress = 0f,
-                            streaming = true,
-                            onSpeak = {},
-                        )
-                    }
-                }
             }
-            ConversationPagingControls(
-                listState = listState,
-                onPagingAwayFromLatest = { followLatest = false },
-                onReturnToLatest = { followLatest = true },
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 8.dp),
-            )
         }
 
         Row(
@@ -405,7 +398,7 @@ private fun MessageBubble(
                 bottomStart = 20.dp,
                 bottomEnd = 20.dp,
             ),
-            modifier = Modifier.fillMaxWidth(0.82f),
+            modifier = Modifier.fillMaxWidth(if (isUser) 0.82f else 0.88f),
         ) {
             Column {
                 if (isUser) {
@@ -492,7 +485,8 @@ private fun TutorFollowText(
         Text(
             text = renderedText,
             color = MaterialTheme.colorScheme.onSurface,
-            lineHeight = 22.sp,
+            fontSize = 14.sp,
+            lineHeight = 20.sp,
             onTextLayout = { textLayout = it },
             modifier = Modifier.padding(bottom = 7.dp),
         )
