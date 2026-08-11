@@ -15,6 +15,7 @@ import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,17 +65,14 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
@@ -106,6 +104,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -119,7 +119,6 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderScreen(
     documentId: String,
@@ -155,7 +154,6 @@ fun ReaderScreen(
     var showColorMenu by remember { mutableStateOf(false) }
     var showBookmarkMenu by remember { mutableStateOf(false) }
     var showTutorSheet by remember(page) { mutableStateOf(false) }
-    val tutorSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val context = LocalContext.current
     val view = LocalView.current
@@ -478,20 +476,15 @@ fun ReaderScreen(
     }
 
     if (showTutorSheet) {
-        ModalBottomSheet(
+        FixedTutorPanel(
             onDismissRequest = { showTutorSheet = false },
-            sheetState = tutorSheetState,
-            containerColor = MaterialTheme.colorScheme.surface,
-        ) {
-            ReaderTutorConversation(
-                selection = tutorSelection.ifBlank { selectedSource },
-                messages = tutorMessages,
-                streamingReply = tutorStreamingReply,
-                streaming = tutorStreaming,
-                error = tutorError,
-                onSend = viewModel::sendReaderTutorFollowUp,
-            )
-        }
+            selection = tutorSelection.ifBlank { selectedSource },
+            messages = tutorMessages,
+            streamingReply = tutorStreamingReply,
+            streaming = tutorStreaming,
+            error = tutorError,
+            onSend = viewModel::sendReaderTutorFollowUp,
+        )
     }
 }
 
@@ -1188,6 +1181,64 @@ private fun SelectionHandle(
                 )
             },
     )
+}
+
+@Composable
+private fun FixedTutorPanel(
+    onDismissRequest: () -> Unit,
+    selection: String,
+    messages: List<ReaderTutorMessage>,
+    streamingReply: String,
+    streaming: Boolean,
+    error: String?,
+    onSend: (String) -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        val scrimInteraction = remember { MutableInteractionSource() }
+        val panelInteraction = remember { MutableInteractionSource() }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.32f))
+                .clickable(
+                    interactionSource = scrimInteraction,
+                    indication = null,
+                    onClick = onDismissRequest,
+                ),
+        ) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .clickable(
+                        interactionSource = panelInteraction,
+                        indication = null,
+                        onClick = {},
+                    ),
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 2.dp,
+                shadowElevation = 14.dp,
+            ) {
+                ReaderTutorConversation(
+                    selection = selection,
+                    messages = messages,
+                    streamingReply = streamingReply,
+                    streaming = streaming,
+                    error = error,
+                    onSend = onSend,
+                )
+            }
+        }
+    }
 }
 
 @Composable
