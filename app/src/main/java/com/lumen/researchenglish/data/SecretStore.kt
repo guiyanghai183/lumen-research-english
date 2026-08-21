@@ -58,6 +58,7 @@ class SecretStore(context: Context) {
 
     companion object {
         const val DEEPSEEK_KEY = "deepseek_api_key"
+        const val QWEN_KEY = "qwen_api_key"
         const val TENCENT_SECRET_ID = "tencent_secret_id"
         const val TENCENT_SECRET_KEY = "tencent_secret_key"
         private const val KEY_ALIAS = "lumen-api-secrets"

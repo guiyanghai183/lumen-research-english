@@ -2,7 +2,7 @@
 
 Lumen is a native Android app for research-English learning. It combines a PDF library and reader, public-domain books, vocabulary review, an English Tutor, and local learning progress.
 
-Current source version: **1.4.5** (`versionCode 23`).
+Current source version: **1.4.6** (`versionCode 24`).
 
 ## What is included
 
@@ -10,7 +10,7 @@ Current source version: **1.4.5** (`versionCode 23`).
 - In-reader Tutor notes for selected passages, with clear Chinese explanations, wider replies, conflict-free conversation scrolling, and smooth open/close transitions.
 - Local daily check-ins with current streak, longest streak, total days, and a once-per-day XP reward.
 - Project Gutenberg search and public-domain book importing.
-- English Tutor with streamed replies, interruption-free history scrolling, editable `memory.md`, chat history, secure on-device API-setting storage, and DeepSeek balance display.
+- English Tutor with streamed replies, interruption-free history scrolling, editable `memory.md`, chat history, secure on-device API-setting storage, and a switchable DeepSeek V4 Flash / Alibaba Qwen3.7 Flash backend.
 - TOEFL, CET-4, and CET-6 vocabulary decks with Chinese definitions and spaced review.
 - Review dashboard with Due / Learning / Memory states, unlimited manual practice, predicted recall, and dinosaur learning progress.
 - In-app GitHub APK update download, integrity check, and Android system installation confirmation.
@@ -23,7 +23,7 @@ All reading, bookmarks, check-ins, vocabulary, Tutor memory, and progress data a
 app/src/main/java/com/lumen/researchenglish/
   data/       Room database, repositories, encrypted local settings
   domain/     review scheduler, memory model, learning-level rules
-  network/    DeepSeek, Tencent, Gutenberg, and update clients
+  network/    Tutor AI, Tencent, Gutenberg, and update clients
   ui/         Compose screens and AppViewModel
 app/src/main/assets/
   vocabulary/ bundled TOEFL, CET-4, CET-6 data
@@ -56,7 +56,7 @@ The output is at `app/build/outputs/apk/debug/app-debug.apk`.
 
 Do not commit API keys, signing files, `local.properties`, `.env` files, generated APKs, or build caches. The included `.gitignore` excludes them.
 
-Enter DeepSeek and Tencent credentials only in the app's Settings screen. They are encrypted with Android Keystore and remain on the device; they are not stored in this repository.
+Enter DeepSeek, Alibaba Cloud Model Studio, and Tencent credentials only in the app's Settings screen. They are encrypted with Android Keystore and remain on the device; they are not stored in this repository. DeepSeek remains the migration-safe default; after both AI keys are saved, the active Tutor provider can be changed without re-entering either key.
 
 If a key was ever shared in a chat or committed elsewhere, revoke and replace it at the provider before release.
 

@@ -1,6 +1,7 @@
 package com.lumen.researchenglish.network
 
 import com.lumen.researchenglish.data.ChatMessageEntity
+import com.lumen.researchenglish.domain.TutorApiProvider
 import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZoneOffset
@@ -28,8 +29,13 @@ data class DeepSeekBalance(
     val balances: List<DeepSeekBalanceInfo>,
 )
 
-class DeepSeekClient(private val client: OkHttpClient = OkHttpClient()) {
-    suspend fun getBalance(apiKey: String): DeepSeekBalance = withContext(Dispatchers.IO) {
+data class TutorApiConfig(
+    val provider: TutorApiProvider,
+    val apiKey: String,
+)
+
+class TutorApiClient(private val client: OkHttpClient = OkHttpClient()) {
+    suspend fun getDeepSeekBalance(apiKey: String): DeepSeekBalance = withContext(Dispatchers.IO) {
         require(apiKey.isNotBlank()) { "Please add a new DeepSeek API key in Settings." }
         val request = Request.Builder()
             .url("https://api.deepseek.com/user/balance")
@@ -62,14 +68,16 @@ class DeepSeekClient(private val client: OkHttpClient = OkHttpClient()) {
     }
 
     suspend fun chatStream(
-        apiKey: String,
+        config: TutorApiConfig,
         memory: String,
         history: List<ChatMessageEntity>,
         userMessage: String,
         systemInstruction: String = DEFAULT_TUTOR_INSTRUCTION,
         onChunk: (String) -> Unit,
     ): String = withContext(Dispatchers.IO) {
-        require(apiKey.isNotBlank()) { "Please add a new DeepSeek API key in Settings." }
+        require(config.apiKey.isNotBlank()) {
+            "Please add an ${config.provider.displayName} API key in Settings."
+        }
         val messages = JSONArray().apply {
             put(
                 JSONObject()
@@ -91,26 +99,30 @@ class DeepSeekClient(private val client: OkHttpClient = OkHttpClient()) {
             put(JSONObject().put("role", "user").put("content", userMessage))
         }
         val payload = JSONObject()
-            .put("model", "deepseek-v4-flash")
-            .put("thinking", JSONObject().put("type", "disabled"))
+            .putTutorModel(config.provider)
             .put("messages", messages)
             .put("temperature", 0.6)
             .put("max_tokens", 1200)
             .put("stream", true)
             .toString()
         val request = Request.Builder()
-            .url("https://api.deepseek.com/chat/completions")
-            .header("Authorization", "Bearer $apiKey")
+            .url(config.provider.chatCompletionsUrl())
+            .header("Authorization", "Bearer ${config.apiKey}")
             .header("Accept", "text/event-stream")
             .post(payload.toRequestBody(JSON))
             .build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
                 val body = response.body?.string().orEmpty()
-                throw IllegalStateException(parseApiError(body, "DeepSeek request failed (${response.code})."))
+                throw IllegalStateException(
+                    parseApiError(
+                        body,
+                        "${config.provider.displayName} request failed (${response.code}).",
+                    ),
+                )
             }
             val source = response.body?.source()
-                ?: throw IllegalStateException("DeepSeek returned an empty response.")
+                ?: throw IllegalStateException("${config.provider.displayName} returned an empty response.")
             val answer = StringBuilder()
             while (!source.exhausted()) {
                 val line = source.readUtf8Line() ?: break
@@ -120,7 +132,9 @@ class DeepSeekClient(private val client: OkHttpClient = OkHttpClient()) {
                 if (data == "[DONE]") break
                 val event = JSONObject(data)
                 event.optJSONObject("error")?.let { error ->
-                    throw IllegalStateException(error.optString("message", "DeepSeek stream failed."))
+                    throw IllegalStateException(
+                        error.optString("message", "${config.provider.displayName} stream failed."),
+                    )
                 }
                 val choices = event.optJSONArray("choices") ?: continue
                 if (choices.length() == 0) continue
@@ -144,13 +158,15 @@ class DeepSeekClient(private val client: OkHttpClient = OkHttpClient()) {
     }
 
     suspend fun summarizeMemory(
-        apiKey: String,
+        config: TutorApiConfig,
         existingMemory: String,
         history: List<ChatMessageEntity>,
         userMessage: String,
         assistantMessage: String,
     ): String = withContext(Dispatchers.IO) {
-        require(apiKey.isNotBlank()) { "Please add a new DeepSeek API key in Settings." }
+        require(config.apiKey.isNotBlank()) {
+            "Please add an ${config.provider.displayName} API key in Settings."
+        }
         val messages = JSONArray().apply {
             put(
                 JSONObject()
@@ -190,15 +206,14 @@ class DeepSeekClient(private val client: OkHttpClient = OkHttpClient()) {
             )
         }
         val payload = JSONObject()
-            .put("model", "deepseek-v4-flash")
-            .put("thinking", JSONObject().put("type", "disabled"))
+            .putTutorModel(config.provider)
             .put("messages", messages)
             .put("temperature", 0.2)
             .put("max_tokens", 700)
             .toString()
         val request = Request.Builder()
-            .url("https://api.deepseek.com/chat/completions")
-            .header("Authorization", "Bearer $apiKey")
+            .url(config.provider.chatCompletionsUrl())
+            .header("Authorization", "Bearer ${config.apiKey}")
             .post(payload.toRequestBody(JSON))
             .build()
         client.newCall(request).execute().use { response ->
@@ -216,6 +231,26 @@ class DeepSeekClient(private val client: OkHttpClient = OkHttpClient()) {
                 .trim()
         }
     }
+}
+
+private fun JSONObject.putTutorModel(provider: TutorApiProvider): JSONObject = apply {
+    when (provider) {
+        TutorApiProvider.DEEPSEEK -> {
+            put("model", "deepseek-v4-flash")
+            put("thinking", JSONObject().put("type", "disabled"))
+        }
+
+        TutorApiProvider.QWEN -> {
+            put("model", "qwen3.7-flash")
+            put("enable_thinking", false)
+        }
+    }
+}
+
+private fun TutorApiProvider.chatCompletionsUrl(): String = when (this) {
+    TutorApiProvider.DEEPSEEK -> "https://api.deepseek.com/chat/completions"
+    TutorApiProvider.QWEN ->
+        "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 }
 
 class TencentTranslator(private val client: OkHttpClient = OkHttpClient()) {

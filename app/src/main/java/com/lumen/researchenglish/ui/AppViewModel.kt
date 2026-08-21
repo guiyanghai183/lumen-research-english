@@ -23,11 +23,13 @@ import com.lumen.researchenglish.domain.LearningLeveling
 import com.lumen.researchenglish.domain.LearningProgress
 import com.lumen.researchenglish.domain.DailyCheckInStats
 import com.lumen.researchenglish.domain.ReviewRating
+import com.lumen.researchenglish.domain.TutorApiProvider
 import com.lumen.researchenglish.network.AppUpdate
 import com.lumen.researchenglish.network.DeepSeekBalance
-import com.lumen.researchenglish.network.DeepSeekClient
 import com.lumen.researchenglish.network.TencentSpeechClient
 import com.lumen.researchenglish.network.TencentTranslator
+import com.lumen.researchenglish.network.TutorApiClient
+import com.lumen.researchenglish.network.TutorApiConfig
 import com.lumen.researchenglish.network.UpdateClient
 import com.lumen.researchenglish.network.UpdateDownloadProgress
 import com.lumen.researchenglish.network.UpdateInstallResult
@@ -61,7 +63,7 @@ private data class ReaderPrefetchRequest(
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as LumenApplication
-    private val deepSeekClient = DeepSeekClient()
+    private val tutorApiClient = TutorApiClient()
     private val translator = TencentTranslator()
     private val speechClient = TencentSpeechClient()
     private val speechPlayer = SpeechPlayer(application)
@@ -208,6 +210,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         app.secretStore.get(SecretStore.DEEPSEEK_KEY).isNotBlank(),
     )
     val hasDeepSeekKey: StateFlow<Boolean> = _hasDeepSeekKey.asStateFlow()
+
+    private val _hasQwenKey = MutableStateFlow(
+        app.secretStore.get(SecretStore.QWEN_KEY).isNotBlank(),
+    )
+    val hasQwenKey: StateFlow<Boolean> = _hasQwenKey.asStateFlow()
+
+    private val _tutorApiProvider = MutableStateFlow(app.profileStore.getTutorApiProvider())
+    val tutorApiProvider: StateFlow<TutorApiProvider> = _tutorApiProvider.asStateFlow()
 
     private val _hasTencentCredentials = MutableStateFlow(
         app.secretStore.get(SecretStore.TENCENT_SECRET_ID).isNotBlank() &&
@@ -445,13 +455,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _translation.value = quickTranslation
 
         if (!SINGLE_ENGLISH_WORD.matches(clean)) return@launchTask
-        val deepSeekKey = app.secretStore.get(SecretStore.DEEPSEEK_KEY)
-        if (deepSeekKey.isBlank()) {
+        val tutorConfig = currentTutorApiConfig()
+        if (tutorConfig.apiKey.isBlank()) {
             _translation.value = buildString {
                 appendLine("**快速译义 / Quick meaning**")
                 appendLine(quickTranslation)
                 appendLine()
-                append("配置 DeepSeek API Key 后，可结合当前句子补充词性、常见义项与例句。")
+                append("配置 ${tutorConfig.provider.displayName} API Key 后，可结合当前句子补充词性、常见义项与例句。")
             }
             return@launchTask
         }
@@ -460,8 +470,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             .takeIf { it.isNotBlank() && !it.equals(clean, ignoreCase = true) }
         val enriched = StringBuilder()
         try {
-            deepSeekClient.chatStream(
-                apiKey = deepSeekKey,
+            tutorApiClient.chatStream(
+                config = tutorConfig,
                 memory = "",
                 history = emptyList(),
                 userMessage = buildString {
@@ -678,8 +688,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     _memory.value = app.memoryRepository.read()
                     _memoryStatus.value = "Saved to editable memory: ${savedFacts.joinToString()}."
                 }
-                val completed = deepSeekClient.chatStream(
-                    apiKey = app.secretStore.get(SecretStore.DEEPSEEK_KEY),
+                val completed = tutorApiClient.chatStream(
+                    config = currentTutorApiConfig(),
                     memory = app.memoryRepository.read(),
                     history = history,
                     userMessage = clean,
@@ -688,7 +698,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         _streamingReply.value = answer.toString()
                     },
                 )
-                require(completed.isNotBlank()) { "DeepSeek returned an empty reply." }
+                require(completed.isNotBlank()) { "Tutor returned an empty reply." }
                 app.chatRepository.add(sessionId, "assistant", completed)
                 awardLearningXp(3)
                 if (userMessageCount % _memoryUpdateFrequency.value == 0) {
@@ -959,12 +969,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun saveApiSettings(deepSeekKey: String, secretId: String, secretKey: String) {
+    fun saveApiSettings(
+        provider: TutorApiProvider,
+        deepSeekKey: String,
+        qwenKey: String,
+        secretId: String,
+        secretKey: String,
+    ) {
         val savedDeepSeekKey = deepSeekKey.isNotBlank()
+        app.profileStore.setTutorApiProvider(provider)
+        _tutorApiProvider.value = provider
         if (savedDeepSeekKey) app.secretStore.put(SecretStore.DEEPSEEK_KEY, deepSeekKey.trim())
+        if (qwenKey.isNotBlank()) app.secretStore.put(SecretStore.QWEN_KEY, qwenKey.trim())
         if (secretId.isNotBlank()) app.secretStore.put(SecretStore.TENCENT_SECRET_ID, secretId.trim())
         if (secretKey.isNotBlank()) app.secretStore.put(SecretStore.TENCENT_SECRET_KEY, secretKey.trim())
         _hasDeepSeekKey.value = app.secretStore.get(SecretStore.DEEPSEEK_KEY).isNotBlank()
+        _hasQwenKey.value = app.secretStore.get(SecretStore.QWEN_KEY).isNotBlank()
         _hasTencentCredentials.value =
             app.secretStore.get(SecretStore.TENCENT_SECRET_ID).isNotBlank() &&
                 app.secretStore.get(SecretStore.TENCENT_SECRET_KEY).isNotBlank()
@@ -973,9 +993,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearApiSettings() {
         app.secretStore.put(SecretStore.DEEPSEEK_KEY, "")
+        app.secretStore.put(SecretStore.QWEN_KEY, "")
         app.secretStore.put(SecretStore.TENCENT_SECRET_ID, "")
         app.secretStore.put(SecretStore.TENCENT_SECRET_KEY, "")
         _hasDeepSeekKey.value = false
+        _hasQwenKey.value = false
         _hasTencentCredentials.value = false
         deepSeekBalanceRequestGeneration += 1
         _deepSeekBalance.value = null
@@ -997,7 +1019,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _deepSeekBalanceRefreshing.value = true
             _deepSeekBalanceError.value = null
             try {
-                val balance = deepSeekClient.getBalance(apiKey)
+                val balance = tutorApiClient.getDeepSeekBalance(apiKey)
                 if (generation == deepSeekBalanceRequestGeneration) {
                     _deepSeekBalance.value = balance
                     _deepSeekBalanceUpdatedAt.value = System.currentTimeMillis()
@@ -1187,8 +1209,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         readerTutorJob = viewModelScope.launch {
             val answer = StringBuilder()
             try {
-                val completed = deepSeekClient.chatStream(
-                    apiKey = app.secretStore.get(SecretStore.DEEPSEEK_KEY),
+                val completed = tutorApiClient.chatStream(
+                    config = currentTutorApiConfig(),
                     memory = app.memoryRepository.read(),
                     history = history,
                     userMessage = apiUserMessage,
@@ -1288,6 +1310,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         ReviewRating.EASY -> 10
     }
 
+    private fun currentTutorApiConfig(): TutorApiConfig {
+        val provider = _tutorApiProvider.value
+        val key = when (provider) {
+            TutorApiProvider.DEEPSEEK -> app.secretStore.get(SecretStore.DEEPSEEK_KEY)
+            TutorApiProvider.QWEN -> app.secretStore.get(SecretStore.QWEN_KEY)
+        }
+        return TutorApiConfig(provider = provider, apiKey = key)
+    }
+
     private fun downloadStatus(update: AppUpdate, progress: UpdateDownloadProgress): String {
         val fraction = progress.fraction ?: return "Downloading Lumen ${update.versionName}..."
         return "Downloading Lumen ${update.versionName}: ${(fraction * 100).toInt()}%"
@@ -1313,8 +1344,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _memoryStatus.value = "Tutor is organizing what it has learned about you…"
             try {
-                val summary = deepSeekClient.summarizeMemory(
-                    apiKey = app.secretStore.get(SecretStore.DEEPSEEK_KEY),
+                val summary = tutorApiClient.summarizeMemory(
+                    config = currentTutorApiConfig(),
                     existingMemory = app.memoryRepository.read(),
                     history = history,
                     userMessage = userMessage,

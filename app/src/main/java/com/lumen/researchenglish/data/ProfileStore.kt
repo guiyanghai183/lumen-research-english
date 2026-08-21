@@ -3,6 +3,7 @@ package com.lumen.researchenglish.data
 import android.content.Context
 import com.lumen.researchenglish.domain.DailyCheckIn
 import com.lumen.researchenglish.domain.DailyCheckInStats
+import com.lumen.researchenglish.domain.TutorApiProvider
 import java.time.LocalDate
 
 class ProfileStore(context: Context) {
@@ -116,6 +117,13 @@ class ProfileStore(context: Context) {
         preferences.edit().putInt(MEMORY_UPDATE_FREQUENCY, frequency.coerceIn(1, 50)).apply()
     }
 
+    fun getTutorApiProvider(): TutorApiProvider =
+        TutorApiProvider.fromStorage(preferences.getString(TUTOR_API_PROVIDER, null))
+
+    fun setTutorApiProvider(provider: TutorApiProvider) {
+        preferences.edit().putString(TUTOR_API_PROVIDER, provider.storageValue).apply()
+    }
+
     fun getCurrentChatSessionId(): String =
         preferences.getString(CURRENT_CHAT_SESSION, DEFAULT_CHAT_SESSION)
             .orEmpty()
@@ -151,6 +159,7 @@ class ProfileStore(context: Context) {
         private const val CHECK_IN_DATES = "daily_check_in_dates"
         private const val CHAT_HISTORY_LIMIT = "chat_history_limit"
         private const val MEMORY_UPDATE_FREQUENCY = "memory_update_frequency"
+        private const val TUTOR_API_PROVIDER = "tutor_api_provider"
         private const val CURRENT_CHAT_SESSION = "current_chat_session"
     }
 }

@@ -33,6 +33,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -57,6 +58,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lumen.researchenglish.domain.TutorApiProvider
 import com.lumen.researchenglish.network.DeepSeekBalance
 import com.lumen.researchenglish.ui.theme.SoftIndigo
 import java.text.DateFormat
@@ -80,6 +82,8 @@ fun SettingsScreen(viewModel: AppViewModel) {
     val chatHistoryLimit by viewModel.chatHistoryLimit.collectAsStateWithLifecycle()
     val memoryUpdateFrequency by viewModel.memoryUpdateFrequency.collectAsStateWithLifecycle()
     val hasDeepSeekKey by viewModel.hasDeepSeekKey.collectAsStateWithLifecycle()
+    val hasQwenKey by viewModel.hasQwenKey.collectAsStateWithLifecycle()
+    val tutorApiProvider by viewModel.tutorApiProvider.collectAsStateWithLifecycle()
     val hasTencentCredentials by viewModel.hasTencentCredentials.collectAsStateWithLifecycle()
     val deepSeekBalance by viewModel.deepSeekBalance.collectAsStateWithLifecycle()
     val deepSeekBalanceRefreshing by viewModel.deepSeekBalanceRefreshing.collectAsStateWithLifecycle()
@@ -92,6 +96,10 @@ fun SettingsScreen(viewModel: AppViewModel) {
     var voiceDraft by remember(voiceType) { mutableStateOf(voiceType.toString()) }
     var updateDraft by remember(updateSource) { mutableStateOf(updateSource) }
     var deepSeekKey by remember { mutableStateOf("") }
+    var qwenKey by remember { mutableStateOf("") }
+    var tutorProviderDraft by rememberSaveable {
+        mutableStateOf(tutorApiProvider.storageValue)
+    }
     var tencentId by remember { mutableStateOf("") }
     var tencentKey by remember { mutableStateOf("") }
     var historyLimitDraft by remember(chatHistoryLimit) { mutableStateOf(chatHistoryLimit.toString()) }
@@ -112,6 +120,10 @@ fun SettingsScreen(viewModel: AppViewModel) {
 
     LaunchedEffect(Unit) {
         viewModel.refreshDeepSeekBalance()
+    }
+
+    LaunchedEffect(tutorApiProvider) {
+        tutorProviderDraft = tutorApiProvider.storageValue
     }
 
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -208,29 +220,79 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 subtitle = "Encrypted with Android Keystore",
             ) {
                 Text(
-                    "Do not reuse the DeepSeek key previously pasted into chat. Revoke it first and enter a newly generated key here.",
-                    color = MaterialTheme.colorScheme.error,
+                    "Choose the Tutor provider. Both keys can stay saved so switching providers does not require entering them again.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Spacer(Modifier.height(12.dp))
-                StatusLine("DeepSeek", hasDeepSeekKey)
-                Spacer(Modifier.height(10.dp))
-                DeepSeekBalancePanel(
-                    configured = hasDeepSeekKey,
-                    balance = deepSeekBalance,
-                    refreshing = deepSeekBalanceRefreshing,
-                    error = deepSeekBalanceError,
-                    updatedAt = deepSeekBalanceUpdatedAt,
-                    onRefresh = viewModel::refreshDeepSeekBalance,
+                Text("Tutor API", fontWeight = FontWeight.SemiBold)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    FilterChip(
+                        selected = tutorProviderDraft == TutorApiProvider.DEEPSEEK.storageValue,
+                        onClick = {
+                            tutorProviderDraft = TutorApiProvider.DEEPSEEK.storageValue
+                        },
+                        label = { Text("DeepSeek") },
+                        modifier = Modifier.weight(1f),
+                    )
+                    FilterChip(
+                        selected = tutorProviderDraft == TutorApiProvider.QWEN.storageValue,
+                        onClick = { tutorProviderDraft = TutorApiProvider.QWEN.storageValue },
+                        label = { Text("Qwen3.7 Flash") },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Text(
+                    "Active after saving: ${TutorApiProvider.fromStorage(tutorProviderDraft).displayName}",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelMedium,
                 )
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
+                StatusLine("DeepSeek V4 Flash", hasDeepSeekKey)
+                Spacer(Modifier.height(10.dp))
+                if (tutorProviderDraft == TutorApiProvider.DEEPSEEK.storageValue) {
+                    DeepSeekBalancePanel(
+                        configured = hasDeepSeekKey,
+                        balance = deepSeekBalance,
+                        refreshing = deepSeekBalanceRefreshing,
+                        error = deepSeekBalanceError,
+                        updatedAt = deepSeekBalanceUpdatedAt,
+                        onRefresh = viewModel::refreshDeepSeekBalance,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
                 OutlinedTextField(
                     value = deepSeekKey,
                     onValueChange = { deepSeekKey = it },
-                    label = { Text("New DeepSeek API key") },
+                    label = { Text("DeepSeek API key") },
+                    supportingText = {
+                        Text(if (hasDeepSeekKey) "Leave blank to keep the saved key" else "Required when DeepSeek is active")
+                    },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                StatusLine("Alibaba Cloud Qwen3.7 Flash", hasQwenKey)
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = qwenKey,
+                    onValueChange = { qwenKey = it },
+                    label = { Text("Alibaba Cloud Model Studio API key") },
+                    supportingText = {
+                        Text(if (hasQwenKey) "Leave blank to keep the saved key" else "Required when Qwen is active")
+                    },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Uses qwen3.7-flash through Alibaba Cloud's OpenAI-compatible Beijing endpoint.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
                 )
                 Spacer(Modifier.height(12.dp))
                 StatusLine("Tencent Translation + Speech", hasTencentCredentials)
@@ -255,8 +317,15 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
                         onClick = {
-                            viewModel.saveApiSettings(deepSeekKey, tencentId, tencentKey)
+                            viewModel.saveApiSettings(
+                                provider = TutorApiProvider.fromStorage(tutorProviderDraft),
+                                deepSeekKey = deepSeekKey,
+                                qwenKey = qwenKey,
+                                secretId = tencentId,
+                                secretKey = tencentKey,
+                            )
                             deepSeekKey = ""
+                            qwenKey = ""
                             tencentId = ""
                             tencentKey = ""
                         },
