@@ -73,6 +73,7 @@ class TutorApiClient(private val client: OkHttpClient = OkHttpClient()) {
         history: List<ChatMessageEntity>,
         userMessage: String,
         systemInstruction: String = DEFAULT_TUTOR_INSTRUCTION,
+        enableWebSearch: Boolean = false,
         onChunk: (String) -> Unit,
     ): String = withContext(Dispatchers.IO) {
         require(config.apiKey.isNotBlank()) {
@@ -98,12 +99,27 @@ class TutorApiClient(private val client: OkHttpClient = OkHttpClient()) {
             }
             put(JSONObject().put("role", "user").put("content", userMessage))
         }
+        require(!enableWebSearch || config.provider == TutorApiProvider.QWEN) {
+            "Native web search is available through Alibaba Qwen."
+        }
         val payload = JSONObject()
             .putTutorModel(config.provider)
             .put("messages", messages)
             .put("temperature", 0.6)
             .put("max_tokens", 1200)
             .put("stream", true)
+            .apply {
+                if (enableWebSearch) {
+                    put("enable_search", true)
+                    put(
+                        "search_options",
+                        JSONObject()
+                            .put("forced_search", true)
+                            .put("search_strategy", "agent")
+                            .put("citation_format", "[ref_<number>]"),
+                    )
+                }
+            }
             .toString()
         val request = Request.Builder()
             .url(config.provider.chatCompletionsUrl())

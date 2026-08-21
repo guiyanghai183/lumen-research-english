@@ -7,6 +7,7 @@ data class DailyCheckInStats(
     val currentStreak: Int,
     val longestStreak: Int,
     val totalDays: Int,
+    val checkInDates: Set<LocalDate>,
 )
 
 object DailyCheckIn {
@@ -38,6 +39,7 @@ object DailyCheckIn {
             currentStreak = currentStreak,
             longestStreak = longestStreak,
             totalDays = dates.size,
+            checkInDates = dates,
         )
     }
 }

@@ -31,10 +31,12 @@ import androidx.compose.material.icons.outlined.AddComment
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.AlertDialog
@@ -81,6 +83,7 @@ fun ChatScreen(viewModel: AppViewModel) {
     val speechProgress by viewModel.speechProgress.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf("") }
     var showHistory by remember { mutableStateOf(false) }
+    var webSearchEnabled by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     var followLatest by remember { mutableStateOf(true) }
     val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
@@ -236,36 +239,56 @@ fun ChatScreen(viewModel: AppViewModel) {
             }
         }
 
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.Bottom,
         ) {
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Ask in English…") },
-                shape = RoundedCornerShape(22.dp),
-                maxLines = 5,
-            )
-            Spacer(Modifier.width(6.dp))
-            IconButton(
-                onClick = {
-                    val message = input
-                    input = ""
-                    followLatest = true
-                    viewModel.sendChat(message)
+            FilterChip(
+                selected = webSearchEnabled,
+                onClick = { webSearchEnabled = !webSearchEnabled },
+                enabled = !chatStreaming,
+                label = { Text("Web search · Qwen") },
+                leadingIcon = {
+                    Icon(Icons.Outlined.Public, contentDescription = null, modifier = Modifier.size(17.dp))
                 },
-                enabled = input.isNotBlank() && !chatStreaming,
-                modifier = Modifier.size(50.dp),
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Outlined.Send,
-                    contentDescription = "Send",
-                    tint = Indigo,
+            )
+            Row(verticalAlignment = Alignment.Bottom) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = {
+                        Text(if (webSearchEnabled) "Ask with live web search…" else "Ask in English…")
+                    },
+                    shape = RoundedCornerShape(22.dp),
+                    maxLines = 5,
+                )
+                Spacer(Modifier.width(6.dp))
+                IconButton(
+                    onClick = {
+                        val message = input
+                        input = ""
+                        followLatest = true
+                        viewModel.sendChat(message, webSearchEnabled)
+                    },
+                    enabled = input.isNotBlank() && !chatStreaming,
+                    modifier = Modifier.size(50.dp),
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Outlined.Send,
+                        contentDescription = if (webSearchEnabled) "Send with web search" else "Send",
+                        tint = Indigo,
+                    )
+                }
+            }
+            if (webSearchEnabled) {
+                Text(
+                    "This request uses Qwen's native web search and your saved Qwen API key.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(start = 6.dp, top = 3.dp),
                 )
             }
         }

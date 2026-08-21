@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -44,7 +45,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -95,6 +98,11 @@ fun ReviewScreen(viewModel: AppViewModel) {
     val learningProgress by viewModel.learningProgress.collectAsStateWithLifecycle()
     val speechLoadingId by viewModel.speechLoadingId.collectAsStateWithLifecycle()
     val speakingId by viewModel.speakingId.collectAsStateWithLifecycle()
+    val vocabularyTutorWord by viewModel.vocabularyTutorWord.collectAsStateWithLifecycle()
+    val vocabularyTutorMessages by viewModel.vocabularyTutorMessages.collectAsStateWithLifecycle()
+    val vocabularyTutorStreamingReply by viewModel.vocabularyTutorStreamingReply.collectAsStateWithLifecycle()
+    val vocabularyTutorStreaming by viewModel.vocabularyTutorStreaming.collectAsStateWithLifecycle()
+    val vocabularyTutorError by viewModel.vocabularyTutorError.collectAsStateWithLifecycle()
     var mode by rememberSaveable { mutableStateOf(ReviewMode.LEARN) }
     var reviewedThisSession by rememberSaveable { mutableIntStateOf(0) }
     var rememberedThisSession by rememberSaveable { mutableIntStateOf(0) }
@@ -157,21 +165,44 @@ fun ReviewScreen(viewModel: AppViewModel) {
                 item {
                     key("${selectedDeck.id}-$deckPosition") {
                         val speechId = "deck-${selectedDeck.id}-$deckPosition"
-                        ActiveLearningCard(
-                            word = activeWord,
-                            position = deckPosition + 1,
-                            total = selectedDeck.words.size,
-                            speechLoading = speechLoadingId == speechId,
-                            speaking = speakingId == speechId,
-                            onSpeak = { viewModel.speak(activeWord.word, speechId) },
-                            onRate = { rating ->
-                                reviewedThisSession += 1
-                                if (rating == ReviewRating.GOOD || rating == ReviewRating.EASY) {
-                                    rememberedThisSession += 1
-                                }
-                                viewModel.learnDeckWord(activeWord, rating)
-                            },
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            ActiveLearningCard(
+                                word = activeWord,
+                                position = deckPosition + 1,
+                                total = selectedDeck.words.size,
+                                speechLoading = speechLoadingId == speechId,
+                                speaking = speakingId == speechId,
+                                onSpeak = { viewModel.speak(activeWord.word, speechId) },
+                                onRate = { rating ->
+                                    reviewedThisSession += 1
+                                    if (rating == ReviewRating.GOOD || rating == ReviewRating.EASY) {
+                                        rememberedThisSession += 1
+                                    }
+                                    viewModel.learnDeckWord(activeWord, rating)
+                                },
+                            )
+                            VocabularyTutorCard(
+                                word = activeWord,
+                                messages = if (vocabularyTutorWord == activeWord.word) {
+                                    vocabularyTutorMessages
+                                } else {
+                                    emptyList()
+                                },
+                                streamingReply = if (vocabularyTutorWord == activeWord.word) {
+                                    vocabularyTutorStreamingReply
+                                } else {
+                                    ""
+                                },
+                                streaming = vocabularyTutorWord == activeWord.word &&
+                                    vocabularyTutorStreaming,
+                                error = vocabularyTutorError.takeIf {
+                                    vocabularyTutorWord == activeWord.word
+                                },
+                                onAsk = { question ->
+                                    viewModel.askVocabularyTutor(activeWord, question)
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -469,6 +500,122 @@ private fun ActiveLearningCard(
         onSpeak = onSpeak,
         onRate = onRate,
     )
+}
+
+@Composable
+private fun VocabularyTutorCard(
+    word: DeckWord,
+    messages: List<ReaderTutorMessage>,
+    streamingReply: String,
+    streaming: Boolean,
+    error: String?,
+    onAsk: (String) -> Unit,
+) {
+    var expanded by remember(word.word) { mutableStateOf(false) }
+    var input by remember(word.word) { mutableStateOf("") }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = SoftIndigo.copy(alpha = 0.7f)),
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(16.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TutorAvatar(size = 36.dp)
+                Spacer(Modifier.width(9.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Word Tutor", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Uses Alibaba Qwen3.7 Flash by default",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+                TextButton(onClick = { expanded = !expanded }) {
+                    Text(if (expanded) "Hide" else "Chat")
+                }
+            }
+            if (expanded) {
+                if (messages.isEmpty() && !streaming) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { onAsk("请结合当前例句讲清这个词的核心含义和用法。") },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("Explain") }
+                        OutlinedButton(
+                            onClick = { onAsk("请给我两个自然例句，并和容易混淆的词做对比。") },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("Examples") }
+                    }
+                }
+                messages.takeLast(6).forEach { message ->
+                    val isUser = message.role == "user"
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isUser) Indigo.copy(alpha = 0.12f)
+                            else MaterialTheme.colorScheme.surface,
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Text(
+                            text = renderTutorMarkdown(
+                                markdown = message.content,
+                                accentColor = Indigo,
+                                codeBackground = MaterialTheme.colorScheme.surfaceVariant,
+                            ),
+                            modifier = Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+                if (streaming) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Text(
+                            text = renderTutorMarkdown(
+                                markdown = streamingReply.ifBlank { "Qwen Tutor is thinking…" },
+                                accentColor = Indigo,
+                                codeBackground = MaterialTheme.colorScheme.surfaceVariant,
+                            ),
+                            modifier = Modifier.padding(12.dp),
+                        )
+                    }
+                }
+                error?.let {
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Row(verticalAlignment = Alignment.Bottom) {
+                    OutlinedTextField(
+                        value = input,
+                        onValueChange = { input = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Ask about ${word.word}…") },
+                        maxLines = 3,
+                        shape = RoundedCornerShape(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    IconButton(
+                        onClick = {
+                            val question = input
+                            input = ""
+                            onAsk(question)
+                        },
+                        enabled = input.isNotBlank() && !streaming,
+                    ) {
+                        Icon(Icons.AutoMirrored.Outlined.Send, "Send to Qwen Tutor", tint = Indigo)
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

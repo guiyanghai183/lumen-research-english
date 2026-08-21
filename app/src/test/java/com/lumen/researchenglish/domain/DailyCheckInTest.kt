@@ -20,6 +20,7 @@ class DailyCheckInTest {
         assertEquals(3, stats.currentStreak)
         assertEquals(3, stats.longestStreak)
         assertEquals(3, stats.totalDays)
+        assertEquals(setOf(today.minusDays(2), today.minusDays(1), today), stats.checkInDates)
     }
 
     @Test

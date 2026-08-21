@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,6 +31,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -63,6 +66,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -79,6 +83,10 @@ import com.lumen.researchenglish.ui.theme.Indigo
 import com.lumen.researchenglish.ui.theme.SoftIndigo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Composable
 fun LibraryScreen(
@@ -90,48 +98,20 @@ fun LibraryScreen(
     val gutenbergLoading by viewModel.gutenbergLoading.collectAsStateWithLifecycle()
     val gutenbergStatus by viewModel.gutenbergStatus.collectAsStateWithLifecycle()
     val dailyCheckIn by viewModel.dailyCheckIn.collectAsStateWithLifecycle()
-    var pendingUri by remember { mutableStateOf<Uri?>(null) }
     var pendingDelete by remember { mutableStateOf<DocumentEntity?>(null) }
     var searchQuery by remember { mutableStateOf("") }
+    val context = LocalContext.current
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
-    ) { uri -> pendingUri = uri }
-
-    pendingUri?.let { uri ->
-        val context = androidx.compose.ui.platform.LocalContext.current
-        AlertDialog(
-            onDismissRequest = { pendingUri = null },
-            title = { Text("Add to Library") },
-            text = { Text("How should this PDF be organized?") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        runCatching {
-                            context.contentResolver.takePersistableUriPermission(
-                                uri,
-                                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                            )
-                        }
-                        viewModel.importPdf(uri, "NOVEL")
-                        pendingUri = null
-                    },
-                ) { Text("Novel") }
-            },
-            dismissButton = {
-                OutlinedButton(
-                    onClick = {
-                        runCatching {
-                            context.contentResolver.takePersistableUriPermission(
-                                uri,
-                                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                            )
-                        }
-                        viewModel.importPdf(uri, "PAPER")
-                        pendingUri = null
-                    },
-                ) { Text("Paper") }
-            },
-        )
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+        viewModel.importPdf(uri, "BOOK")
     }
 
     pendingDelete?.let { document ->
@@ -252,27 +232,16 @@ fun LibraryScreen(
             }
         }
         val sortedDocuments = documents.sortedBy { it.importedAt }
-        val novels = sortedDocuments.filter { it.type == "NOVEL" }
-        val papers = sortedDocuments.filter { it.type == "PAPER" }
-        if (novels.isNotEmpty()) {
+        if (sortedDocuments.isNotEmpty()) {
             item {
                 LibrarySection(
-                    title = "Novels",
-                    subtitle = "${novels.size} book${if (novels.size == 1) "" else "s"}",
-                    documents = novels,
+                    title = "Books",
+                    subtitle = "${sortedDocuments.size} book${if (sortedDocuments.size == 1) "" else "s"}",
+                    documents = sortedDocuments,
                     onOpenDocument = onOpenDocument,
                     onDeleteDocument = { pendingDelete = it },
                 )
             }
-        }
-        item {
-            LibrarySection(
-                title = "Papers",
-                subtitle = "${papers.size} paper${if (papers.size == 1) "" else "s"}",
-                documents = papers,
-                onOpenDocument = onOpenDocument,
-                onDeleteDocument = { pendingDelete = it },
-            )
         }
     }
 }
@@ -282,6 +251,7 @@ private fun DailyCheckInCard(
     stats: DailyCheckInStats,
     onCheckIn: () -> Unit,
 ) {
+    var displayedMonth by remember { mutableStateOf(YearMonth.now()) }
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
         shape = RoundedCornerShape(24.dp),
@@ -342,6 +312,12 @@ private fun DailyCheckInCard(
                     label = "days total",
                     modifier = Modifier.weight(1f),
                 )
+                CheckInMetric(
+                    icon = Icons.Outlined.CheckCircle,
+                    value = stats.longestStreak.toString(),
+                    label = "best streak",
+                    modifier = Modifier.weight(1f),
+                )
                 FilledTonalButton(
                     onClick = onCheckIn,
                     enabled = !stats.checkedInToday,
@@ -349,7 +325,98 @@ private fun DailyCheckInCard(
                     Text(if (stats.checkedInToday) "Done" else "Check in")
                 }
             }
+            CheckInCalendar(
+                month = displayedMonth,
+                checkedDates = stats.checkInDates,
+                onPreviousMonth = { displayedMonth = displayedMonth.minusMonths(1) },
+                onNextMonth = { displayedMonth = displayedMonth.plusMonths(1) },
+            )
         }
+    }
+}
+
+@Composable
+private fun CheckInCalendar(
+    month: YearMonth,
+    checkedDates: Set<LocalDate>,
+    onPreviousMonth: () -> Unit,
+    onNextMonth: () -> Unit,
+) {
+    val today = LocalDate.now()
+    val firstDate = month.atDay(1)
+    val leadingDays = firstDate.dayOfWeek.value - 1
+    val gridStart = firstDate.minusDays(leadingDays.toLong())
+    val dates = remember(month) { List(42) { gridStart.plusDays(it.toLong()) } }
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            IconButton(onClick = onPreviousMonth, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Previous month")
+            }
+            Text(
+                month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH)),
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            IconButton(onClick = onNextMonth, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowForward, "Next month")
+            }
+        }
+        Row(Modifier.fillMaxWidth()) {
+            listOf("M", "T", "W", "T", "F", "S", "S").forEach { day ->
+                Text(
+                    day,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        dates.chunked(7).forEach { week ->
+            Row(Modifier.fillMaxWidth()) {
+                week.forEach { date ->
+                    val checked = date in checkedDates
+                    val isToday = date == today
+                    val inMonth = YearMonth.from(date) == month
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .aspectRatio(1f)
+                            .padding(3.dp)
+                            .clip(CircleShape)
+                            .then(
+                                if (isToday) Modifier.border(1.5.dp, Indigo, CircleShape)
+                                else Modifier,
+                            )
+                            .background(
+                                if (checked) Color(0xFF2E9463)
+                                else Color.Transparent,
+                            ),
+                    ) {
+                        Text(
+                            date.dayOfMonth.toString(),
+                            color = when {
+                                checked -> Color.White
+                                !inMonth -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+                                else -> MaterialTheme.colorScheme.onSurface
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (checked || isToday) FontWeight.SemiBold else FontWeight.Normal,
+                        )
+                    }
+                }
+            }
+        }
+        Text(
+            "Green = checked in · outlined = today · +10 XP once per day",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+        )
     }
 }
 
@@ -438,7 +505,7 @@ private fun EmptyLibrary(onImport: () -> Unit) {
             Text("Your reading space", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Import a PDF novel or paper. Lumen will create a cover from its first page.",
+                "Import a PDF book. Lumen will create a cover from its first page.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(20.dp))
@@ -473,22 +540,6 @@ private fun LibrarySection(
             )
         }
         Spacer(Modifier.height(14.dp))
-        if (documents.isEmpty()) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                ),
-            ) {
-                Text(
-                    "No papers yet. Imported research PDFs will appear here.",
-                    modifier = Modifier.padding(18.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            return@Column
-        }
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(end = 8.dp),

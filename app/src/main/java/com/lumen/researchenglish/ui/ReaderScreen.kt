@@ -394,10 +394,12 @@ fun ReaderScreen(
                     viewModel.removeReaderAnnotations("underline", selectedWords)
                 },
                 onTranslate = {
+                    showTutorSheet = false
                     translationExpanded = true
                     viewModel.translateSelection(selectedSource)
                 },
                 onAskTutor = {
+                    translationExpanded = false
                     showTutorSheet = true
                     if (
                         tutorSelection != selectedSource ||
@@ -976,16 +978,16 @@ private fun SelectionActionCard(
                     .padding(top = 5.dp),
             ) {
                 SelectionTool(
-                    Icons.Outlined.School,
-                    "Ask Tutor",
-                    onAskTutor,
+                    Icons.Outlined.Translate,
+                    "Translate",
+                    onTranslate,
                     emphasized = true,
                     modifier = Modifier.weight(1f),
                 )
                 SelectionTool(
-                    Icons.Outlined.Translate,
-                    "Translate",
-                    onTranslate,
+                    Icons.Outlined.School,
+                    "Ask Tutor",
+                    onAskTutor,
                     modifier = Modifier.weight(1f),
                 )
                 SelectionTool(
@@ -1052,7 +1054,7 @@ private fun SelectionActionCard(
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(Modifier.width(5.dp))
-                        Text("Save word")
+                        Text("Save translation")
                     }
                 }
             }
