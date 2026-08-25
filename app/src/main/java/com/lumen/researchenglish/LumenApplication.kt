@@ -11,6 +11,7 @@ import com.lumen.researchenglish.data.MIGRATION_2_3
 import com.lumen.researchenglish.data.ProfileStore
 import com.lumen.researchenglish.data.ReaderAnnotationStore
 import com.lumen.researchenglish.data.ReaderBookmarkStore
+import com.lumen.researchenglish.data.ReaderTranslationCache
 import com.lumen.researchenglish.data.SecretStore
 import com.lumen.researchenglish.data.VocabularyRepository
 import com.lumen.researchenglish.data.VocabularyDeckRepository
@@ -34,6 +35,7 @@ class LumenApplication : Application() {
     val profileStore by lazy { ProfileStore(this) }
     val readerAnnotationStore by lazy { ReaderAnnotationStore(this) }
     val readerBookmarkStore by lazy { ReaderBookmarkStore(this) }
+    val readerTranslationCache by lazy { ReaderTranslationCache(this) }
     val documentRepository by lazy { DocumentRepository(this, database.documentDao()) }
     val vocabularyRepository by lazy { VocabularyRepository(database.vocabularyDao()) }
     val vocabularyDeckRepository by lazy { VocabularyDeckRepository(this) }

@@ -78,6 +78,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
@@ -139,6 +140,8 @@ fun ReaderScreen(
     val bookmarks by viewModel.readerBookmarks.collectAsStateWithLifecycle()
     val selectionBusy by viewModel.selectionBusy.collectAsStateWithLifecycle()
     val translation by viewModel.translation.collectAsStateWithLifecycle()
+    val translationFromCache by viewModel.translationFromCache.collectAsStateWithLifecycle()
+    val directTranslations by viewModel.directTranslations.collectAsStateWithLifecycle()
     val tutorSelection by viewModel.readerTutorSelection.collectAsStateWithLifecycle()
     val tutorMessages by viewModel.readerTutorMessages.collectAsStateWithLifecycle()
     val tutorStreamingReply by viewModel.readerTutorStreamingReply.collectAsStateWithLifecycle()
@@ -160,6 +163,8 @@ fun ReaderScreen(
     var showColorMenu by remember { mutableStateOf(false) }
     var showBookmarkMenu by remember { mutableStateOf(false) }
     var showTutorSheet by remember(page) { mutableStateOf(false) }
+    var showNoteEditor by remember(page) { mutableStateOf(false) }
+    var noteDraft by remember(page) { mutableStateOf("") }
 
     val context = LocalContext.current
     val view = LocalView.current
@@ -208,6 +213,7 @@ fun ReaderScreen(
             .fillMaxSize()
             .background(pageBackground)
             .pointerInput(page, bitmap, selectedWords.isNotEmpty()) {
+                if (selectedWords.isNotEmpty()) return@pointerInput
                 val currentBitmap = bitmap
                 val baseScale = if (currentBitmap == null) 1f else max(
                     size.width / currentBitmap.width.toFloat().coerceAtLeast(1f),
@@ -325,7 +331,16 @@ fun ReaderScreen(
                 selectedSource = selectedSource,
                 lineMode = lineMode,
                 translation = translation,
+                translationFromCache = translationFromCache,
                 translationExpanded = translationExpanded,
+                selectionNotes = annotations.filter { annotation ->
+                    annotation.style == "note" && annotation.rects.any { rect ->
+                        selectedWords.any { word ->
+                            rect.left < word.right && rect.right > word.left &&
+                                rect.top < word.bottom && rect.bottom > word.top
+                        }
+                    }
+                },
                 selectionSpeaking = selectionSpeaking,
                 onWordLongPress = { word ->
                     showTutorSheet = false
@@ -412,6 +427,16 @@ fun ReaderScreen(
                 onSave = {
                     viewModel.saveSelection(selectedSource, tutorMarkdownPlainText(translation))
                 },
+                onAddManualNote = {
+                    noteDraft = ""
+                    showNoteEditor = true
+                },
+                onAddTranslationNote = {
+                    viewModel.addReaderNote(selectedSource, selectedWords, translation)
+                },
+                onRemoveNotes = {
+                    viewModel.removeReaderAnnotations("note", selectedWords)
+                },
                 onClose = ::closeSelection,
             )
         }
@@ -492,7 +517,60 @@ fun ReaderScreen(
             streaming = tutorStreaming,
             error = tutorError,
             onSend = viewModel::sendReaderTutorFollowUp,
+            directTranslations = directTranslations,
+            onReadText = { text, requestId -> viewModel.speak(text, requestId) },
+            onTranslateText = viewModel::directTranslate,
+            onDismissTranslation = viewModel::clearDirectTranslation,
+            onAddNote = { content ->
+                viewModel.addReaderNote(selectedSource, selectedWords, content)
+            },
         )
+    }
+
+    if (showNoteEditor) {
+        Dialog(onDismissRequest = { showNoteEditor = false }) {
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 4.dp,
+            ) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(18.dp),
+                ) {
+                    Text("Add reading note", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        selectedSource,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = noteDraft,
+                        onValueChange = { noteDraft = it },
+                        placeholder = { Text("Write your annotation…") },
+                        minLines = 4,
+                        maxLines = 8,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.End,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        androidx.compose.material3.TextButton(
+                            onClick = { showNoteEditor = false },
+                        ) { Text("Cancel") }
+                        FilledTonalButton(
+                            enabled = noteDraft.isNotBlank(),
+                            onClick = {
+                                viewModel.addReaderNote(selectedSource, selectedWords, noteDraft)
+                                showNoteEditor = false
+                            },
+                        ) { Text("Add note") }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -701,6 +779,7 @@ private fun AnnotationLayer(
                 val right = metrics.x(metrics.pageLeft + rect.right * metrics.shownWidth)
                 val bottom = metrics.y(metrics.pageTop + rect.bottom * metrics.shownHeight)
                 val underline = annotation.style == "underline"
+                val note = annotation.style == "note"
                 val lineHeightPx = with(density) { 2.5.dp.toPx() }
                 Box(
                     modifier = Modifier
@@ -720,7 +799,7 @@ private fun AnnotationLayer(
                         )
                         .background(
                             annotationColor(annotation.color).copy(
-                                alpha = if (underline) 0.92f else 0.4f,
+                                alpha = if (underline) 0.92f else if (note) 0.28f else 0.4f,
                             ),
                         ),
                 )
@@ -743,7 +822,9 @@ private fun PositionAwareSelectionLayer(
     selectedSource: String,
     lineMode: Boolean,
     translation: String,
+    translationFromCache: Boolean,
     translationExpanded: Boolean,
+    selectionNotes: List<ReaderAnnotation>,
     selectionSpeaking: Boolean,
     onWordLongPress: (RecognizedWord) -> Unit,
     onWordTap: (RecognizedWord) -> Unit,
@@ -757,6 +838,9 @@ private fun PositionAwareSelectionLayer(
     onAskTutor: () -> Unit,
     onSpeak: () -> Unit,
     onSave: () -> Unit,
+    onAddManualNote: () -> Unit,
+    onAddTranslationNote: () -> Unit,
+    onRemoveNotes: () -> Unit,
     onClose: () -> Unit,
 ) {
     val density = LocalDensity.current
@@ -889,7 +973,9 @@ private fun PositionAwareSelectionLayer(
                 source = selectedSource,
                 lineMode = lineMode,
                 translation = translation,
+                translationFromCache = translationFromCache,
                 translationExpanded = translationExpanded,
+                selectionNotes = selectionNotes,
                 selectionSpeaking = selectionSpeaking,
                 onToggleLine = onToggleLine,
                 onHighlight = onHighlight,
@@ -900,6 +986,9 @@ private fun PositionAwareSelectionLayer(
                 onAskTutor = onAskTutor,
                 onSpeak = onSpeak,
                 onSave = onSave,
+                onAddManualNote = onAddManualNote,
+                onAddTranslationNote = onAddTranslationNote,
+                onRemoveNotes = onRemoveNotes,
                 onClose = onClose,
                 modifier = Modifier
                     .offset { IntOffset(panelX.roundToInt(), panelY.roundToInt()) }
@@ -914,7 +1003,9 @@ private fun SelectionActionCard(
     source: String,
     lineMode: Boolean,
     translation: String,
+    translationFromCache: Boolean,
     translationExpanded: Boolean,
+    selectionNotes: List<ReaderAnnotation>,
     selectionSpeaking: Boolean,
     onToggleLine: () -> Unit,
     onHighlight: (String) -> Unit,
@@ -925,18 +1016,30 @@ private fun SelectionActionCard(
     onAskTutor: () -> Unit,
     onSpeak: () -> Unit,
     onSave: () -> Unit,
+    onAddManualNote: () -> Unit,
+    onAddTranslationNote: () -> Unit,
+    onRemoveNotes: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val cardInteraction = remember { MutableInteractionSource() }
+    val cardScroll = rememberScrollState()
     Card(
-        modifier = modifier.pointerInput(Unit) {
-            detectTapGestures(onTap = {})
-        },
+        modifier = modifier.clickable(
+            interactionSource = cardInteraction,
+            indication = null,
+            onClick = {},
+        ),
         shape = RoundedCornerShape(24.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Column(
+            Modifier
+                .heightIn(max = 460.dp)
+                .verticalScroll(cardScroll)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
@@ -1018,7 +1121,36 @@ private fun SelectionActionCard(
                     onRemove = onRemoveUnderline,
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.weight(1f))
+                SelectionTool(
+                    Icons.Outlined.AddCircleOutline,
+                    "Note",
+                    onAddManualNote,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            if (selectionNotes.isNotEmpty()) {
+                Surface(
+                    color = annotationColor("purple").copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(start = 11.dp, top = 8.dp, bottom = 8.dp),
+                    ) {
+                        Text(
+                            "Notes (${selectionNotes.size}): " + selectionNotes.last().note,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = onRemoveNotes, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Outlined.DeleteOutline, "Remove notes", modifier = Modifier.size(17.dp))
+                        }
+                    }
+                }
             }
 
             if (translationExpanded) {
@@ -1029,24 +1161,37 @@ private fun SelectionActionCard(
                         .fillMaxWidth()
                         .padding(top = 8.dp),
                 ) {
-                    Text(
-                        text = renderTutorMarkdown(
-                            markdown = translation.ifBlank { "Translating…" },
-                            accentColor = Indigo,
-                            codeBackground = MaterialTheme.colorScheme.surfaceVariant,
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier
-                            .heightIn(max = 220.dp)
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 13.dp, vertical = 11.dp),
-                    )
+                    Column(Modifier.padding(horizontal = 13.dp, vertical = 11.dp)) {
+                        if (translationFromCache) {
+                            Text(
+                                "Cached translation",
+                                color = Indigo,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Spacer(Modifier.size(4.dp))
+                        }
+                        Text(
+                            text = renderTutorMarkdown(
+                                markdown = translation.ifBlank { "Translating…" },
+                                accentColor = Indigo,
+                                codeBackground = MaterialTheme.colorScheme.surfaceVariant,
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
                 }
                 Row(
-                    horizontalArrangement = Arrangement.End,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
+                    FilledTonalButton(
+                        onClick = onAddTranslationNote,
+                        enabled = translation.isNotBlank(),
+                    ) {
+                        Text("Add as note")
+                    }
                     FilledTonalButton(onClick = onSave, enabled = translation.isNotBlank()) {
                         Icon(
                             Icons.Outlined.AddCircleOutline,
@@ -1054,7 +1199,7 @@ private fun SelectionActionCard(
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(Modifier.width(5.dp))
-                        Text("Save translation")
+                        Text("Save word")
                     }
                 }
             }
@@ -1200,6 +1345,11 @@ private fun FixedTutorPanel(
     streaming: Boolean,
     error: String?,
     onSend: (String) -> Unit,
+    directTranslations: Map<String, DirectTranslationUiState>,
+    onReadText: (String, String) -> Unit,
+    onTranslateText: (String, String) -> Unit,
+    onDismissTranslation: (String) -> Unit,
+    onAddNote: (String) -> Unit,
 ) {
     var panelVisible by remember { mutableStateOf(false) }
     var dismissalRequested by remember { mutableStateOf(false) }
@@ -1279,6 +1429,11 @@ private fun FixedTutorPanel(
                         streaming = streaming,
                         error = error,
                         onSend = onSend,
+                        directTranslations = directTranslations,
+                        onReadText = onReadText,
+                        onTranslateText = onTranslateText,
+                        onDismissTranslation = onDismissTranslation,
+                        onAddNote = onAddNote,
                     )
                 }
             }
@@ -1297,6 +1452,11 @@ private fun ReaderTutorConversation(
     streaming: Boolean,
     error: String?,
     onSend: (String) -> Unit,
+    directTranslations: Map<String, DirectTranslationUiState>,
+    onReadText: (String, String) -> Unit,
+    onTranslateText: (String, String) -> Unit,
+    onDismissTranslation: (String) -> Unit,
+    onAddNote: (String) -> Unit,
 ) {
     var draft by remember(selection) { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -1341,7 +1501,7 @@ private fun ReaderTutorConversation(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    "Ask follow-up questions without leaving the reader",
+                    "Streamed replies · select text for Read / 直接翻译",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -1379,14 +1539,33 @@ private fun ReaderTutorConversation(
                 .heightIn(min = 120.dp),
         ) {
             items(messages, key = ReaderTutorMessage::id) { message ->
-                ReaderTutorBubble(message.role, message.content)
+                val actionId = "reader-tutor-${message.id}"
+                ReaderTutorBubble(
+                    role = message.role,
+                    content = message.content,
+                    translationState = directTranslations[actionId],
+                    onRead = { selected -> onReadText(selected, "$actionId-read-${selected.hashCode()}") },
+                    onTranslate = { selected -> onTranslateText(selected, actionId) },
+                    onDismissTranslation = { onDismissTranslation(actionId) },
+                    onAddNote = if (message.role == "assistant") {
+                        { onAddNote(message.content) }
+                    } else {
+                        null
+                    },
+                )
             }
             if (streaming) {
                 item(key = "streaming-reader-tutor") {
+                    val actionId = "reader-tutor-streaming"
                     ReaderTutorBubble(
                         role = "assistant",
                         content = streamingReply.ifBlank { "Tutor is reading the passage…" } +
                             if (streamingReply.isBlank()) "" else " ▍",
+                        translationState = directTranslations[actionId],
+                        onRead = { selected -> onReadText(selected, "$actionId-read-${selected.hashCode()}") },
+                        onTranslate = { selected -> onTranslateText(selected, actionId) },
+                        onDismissTranslation = { onDismissTranslation(actionId) },
+                        onAddNote = null,
                     )
                 }
             }
@@ -1449,7 +1628,15 @@ private fun ReaderTutorConversation(
 }
 
 @Composable
-private fun ReaderTutorBubble(role: String, content: String) {
+private fun ReaderTutorBubble(
+    role: String,
+    content: String,
+    translationState: DirectTranslationUiState?,
+    onRead: (String) -> Unit,
+    onTranslate: (String) -> Unit,
+    onDismissTranslation: () -> Unit,
+    onAddNote: (() -> Unit)?,
+) {
     val isUser = role == "user"
     Row(
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
@@ -1469,21 +1656,35 @@ private fun ReaderTutorBubble(role: String, content: String) {
             ),
             modifier = Modifier.fillMaxWidth(if (isUser) 0.88f else 0.96f),
         ) {
-            Text(
-                text = if (isUser) {
-                    androidx.compose.ui.text.AnnotatedString(content)
-                } else {
-                    renderTutorMarkdown(
-                        markdown = content,
-                        accentColor = Indigo,
-                        codeBackground = MaterialTheme.colorScheme.surface,
-                    )
-                },
-                color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface,
-                fontSize = if (isUser) 14.sp else 13.sp,
-                lineHeight = if (isUser) 20.sp else 18.sp,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-            )
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+                SelectableActionText(
+                    text = if (isUser) content else tutorMarkdownPlainText(content),
+                    color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface,
+                    fontSize = if (isUser) 14.sp else 13.sp,
+                    onRead = onRead,
+                    onTranslate = onTranslate,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                InlineDirectTranslation(
+                    state = translationState,
+                    onDismiss = onDismissTranslation,
+                    modifier = Modifier.padding(top = 7.dp),
+                )
+                if (onAddNote != null) {
+                    TextButton(
+                        onClick = onAddNote,
+                        modifier = Modifier.align(Alignment.End),
+                    ) {
+                        Icon(
+                            Icons.Outlined.AddCircleOutline,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Add as note", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
         }
     }
 }

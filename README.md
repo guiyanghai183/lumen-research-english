@@ -2,17 +2,17 @@
 
 Lumen is a native Android app for research-English learning. It combines a PDF library and reader, public-domain books, vocabulary review, an English Tutor, and local learning progress.
 
-Current source version: **1.4.7** (`versionCode 25`).
+Current source version: **1.4.8** (`versionCode 26`).
 
 ## What is included
 
-- Unified PDF and ebook Library with covers, reading progress, full-screen reading, page bookmarks, refined range selection, annotations, translation, and speech.
-- In-reader Tutor notes for selected passages, with clear Chinese explanations, wider replies, conflict-free conversation scrolling, and smooth open/close transitions.
-- Context-aware reading translation that keeps Tencent's quick result and adds a natural DeepSeek/Qwen Tutor interpretation without opening the Tutor conversation panel.
+- Unified PDF and ebook Library with covers, reading progress, full-screen reading, page bookmarks, refined range selection, highlights, underlines, reusable reading notes, translation, and speech.
+- In-reader Tutor notes for selected passages, with streamed replies, selectable Read/direct-translate actions, save-as-annotation support, conflict-free conversation scrolling, and smooth open/close transitions.
+- Context-aware reading translation that keeps Tencent's quick result, adds a natural DeepSeek/Qwen Tutor interpretation without opening the Tutor conversation panel, and caches successful results on device.
 - Local calendar-style daily check-ins with month navigation, current streak, longest streak, total days, and a once-per-day XP reward.
 - Project Gutenberg search and public-domain book importing.
 - English Tutor with streamed replies, interruption-free history scrolling, editable `memory.md`, chat history, secure on-device API-setting storage, a switchable DeepSeek V4 Flash / Alibaba Qwen3.7 Flash backend, and optional Qwen-native web search.
-- TOEFL, CET-4, and CET-6 vocabulary decks with Chinese definitions, spaced review, and an inline multi-turn Qwen Word Tutor.
+- TOEFL, CET-4, and CET-6 vocabulary decks with Chinese definitions, spaced review, selectable word-card content, cleaned translation previews, and an inline multi-turn Qwen Word Tutor.
 - Review dashboard with Due / Learning / Memory states, unlimited manual practice, predicted recall, and dinosaur learning progress.
 - In-app GitHub APK update download, integrity check, and Android system installation confirmation.
 

@@ -56,6 +56,13 @@ data class ReaderTutorMessage(
     val content: String,
 )
 
+data class DirectTranslationUiState(
+    val source: String = "",
+    val translation: String = "",
+    val loading: Boolean = false,
+    val error: String? = null,
+)
+
 internal fun readerTranslationMarkdown(
     quickTranslation: String?,
     tutorTranslation: String?,
@@ -216,6 +223,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _translation = MutableStateFlow("")
     val translation: StateFlow<String> = _translation.asStateFlow()
+
+    private val _translationFromCache = MutableStateFlow(false)
+    val translationFromCache: StateFlow<Boolean> = _translationFromCache.asStateFlow()
+
+    private val _directTranslations =
+        MutableStateFlow<Map<String, DirectTranslationUiState>>(emptyMap())
+    val directTranslations: StateFlow<Map<String, DirectTranslationUiState>> =
+        _directTranslations.asStateFlow()
 
     private val _readerTutorSelection = MutableStateFlow("")
     val readerTutorSelection: StateFlow<String> = _readerTutorSelection.asStateFlow()
@@ -437,6 +452,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         resetRecognition()
         _readerText.value = ""
         _translation.value = ""
+        _translationFromCache.value = false
         _selectedText.value = ""
         loadCurrentPage()
     }
@@ -451,6 +467,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         resetRecognition()
         _readerText.value = ""
         _translation.value = ""
+        _translationFromCache.value = false
         _selectedText.value = ""
         loadCurrentPage()
         app.documentRepository.saveProgress(document, newPage)
@@ -512,7 +529,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val clean = text.trim()
         require(clean.isNotBlank()) { "Select a word or sentence first." }
         _selectedText.value = clean
+        val tutorConfig = currentTutorApiConfig()
+        val cacheProvider = if (tutorConfig.apiKey.isBlank()) {
+            "tencent-quick"
+        } else {
+            tutorConfig.provider.name
+        }
+        val document = _readerDocument.value
+        val page = _readerPage.value
+        val cached = document?.let {
+            app.readerTranslationCache.get(it.id, page, cacheProvider, clean)
+        }
+        if (!cached.isNullOrBlank()) {
+            _translation.value = cached
+            _translationFromCache.value = true
+            return@launchTask
+        }
         _translation.value = ""
+        _translationFromCache.value = false
         val quickTranslation = try {
             translator.translate(
                 secretId = app.secretStore.get(SecretStore.TENCENT_SECRET_ID),
@@ -524,10 +558,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         } catch (_: Throwable) {
             null
         }
-        val tutorConfig = currentTutorApiConfig()
         val quickUnavailable = quickTranslation.isNullOrBlank()
         if (tutorConfig.apiKey.isBlank()) {
-            _translation.value = readerTranslationMarkdown(
+            val result = readerTranslationMarkdown(
                 quickTranslation = quickTranslation,
                 tutorTranslation = null,
                 tutorProviderName = tutorConfig.provider.displayName,
@@ -537,6 +570,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     "未配置 ${tutorConfig.provider.displayName} API Key，当前仅显示腾讯快速直译。"
                 },
             )
+            _translation.value = result
+            if (!quickTranslation.isNullOrBlank() && document != null) {
+                app.readerTranslationCache.put(document.id, page, cacheProvider, clean, result)
+            }
             return@launchTask
         }
 
@@ -580,7 +617,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 },
             )
             require(completed.isNotBlank()) { "Tutor returned an empty translation." }
-            _translation.value = readerTranslationMarkdown(
+            val result = readerTranslationMarkdown(
                 quickTranslation = quickTranslation,
                 tutorTranslation = completed,
                 tutorProviderName = tutorConfig.provider.displayName,
@@ -590,10 +627,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     null
                 },
             )
+            _translation.value = result
+            if (document != null) {
+                app.readerTranslationCache.put(document.id, page, cacheProvider, clean, result)
+            }
         } catch (error: CancellationException) {
             throw error
         } catch (_: Throwable) {
-            _translation.value = readerTranslationMarkdown(
+            val result = readerTranslationMarkdown(
                 quickTranslation = quickTranslation,
                 tutorTranslation = enriched.toString(),
                 tutorProviderName = tutorConfig.provider.displayName,
@@ -605,7 +646,43 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     "Tutor 流式响应中断，已保留收到的译解。"
                 },
             )
+            _translation.value = result
         }
+    }
+
+    fun directTranslate(text: String, targetId: String) {
+        val clean = tutorMarkdownPlainText(text).trim()
+        if (clean.isBlank() || targetId.isBlank()) return
+        val current = _directTranslations.value[targetId]
+        if (current?.source == clean && (current.loading || current.translation.isNotBlank())) return
+        _directTranslations.value += targetId to DirectTranslationUiState(
+            source = clean,
+            loading = true,
+        )
+        viewModelScope.launch {
+            try {
+                val translated = translator.translate(
+                    secretId = app.secretStore.get(SecretStore.TENCENT_SECRET_ID),
+                    secretKey = app.secretStore.get(SecretStore.TENCENT_SECRET_KEY),
+                    text = clean,
+                )
+                _directTranslations.value += targetId to DirectTranslationUiState(
+                    source = clean,
+                    translation = translated,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                _directTranslations.value += targetId to DirectTranslationUiState(
+                    source = clean,
+                    error = error.message ?: "Direct translation failed.",
+                )
+            }
+        }
+    }
+
+    fun clearDirectTranslation(targetId: String) {
+        _directTranslations.value -= targetId
     }
 
     fun toggleCurrentBookmark() {
@@ -698,6 +775,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun prepareExternalSelection(text: String) {
         _selectedText.value = text.trim()
         _translation.value = ""
+        _translationFromCache.value = false
     }
 
     fun addReaderAnnotation(
@@ -717,6 +795,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             words = words,
         )
         loadReaderAnnotations()
+    }
+
+    fun addReaderNote(
+        text: String,
+        words: List<RecognizedWord>,
+        note: String,
+    ) {
+        val document = _readerDocument.value ?: return
+        val cleanNote = tutorMarkdownPlainText(note).trim()
+        if (text.isBlank() || words.isEmpty() || cleanNote.isBlank()) return
+        app.readerAnnotationStore.add(
+            documentId = document.id,
+            page = _readerPage.value,
+            style = "note",
+            color = "purple",
+            text = text,
+            words = words,
+            note = cleanNote,
+        )
+        loadReaderAnnotations()
+        awardLearningXp(2)
     }
 
     fun removeReaderAnnotations(
@@ -1354,6 +1453,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         resetRecognition()
         _readerText.value = ""
         _translation.value = ""
+        _translationFromCache.value = false
         _selectedText.value = ""
         loadCurrentPage()
         app.documentRepository.saveProgress(document, safePage)

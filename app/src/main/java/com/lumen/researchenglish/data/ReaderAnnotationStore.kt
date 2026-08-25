@@ -19,6 +19,7 @@ data class ReaderAnnotation(
     val style: String,
     val color: String,
     val text: String,
+    val note: String = "",
     val rects: List<AnnotationRect>,
     val createdAt: Long,
 )
@@ -41,6 +42,7 @@ class ReaderAnnotationStore(context: Context) {
         color: String,
         text: String,
         words: List<RecognizedWord>,
+        note: String = "",
     ): ReaderAnnotation {
         val normalizedStyle = normalizeStyle(style)
         val annotation = ReaderAnnotation(
@@ -50,6 +52,7 @@ class ReaderAnnotationStore(context: Context) {
             style = normalizedStyle,
             color = normalizeColor(color, normalizedStyle),
             text = text.trim(),
+            note = note.trim(),
             rects = words.map {
                 AnnotationRect(
                     left = it.left,
@@ -62,6 +65,7 @@ class ReaderAnnotationStore(context: Context) {
         )
         val preservedAnnotations = readAll().mapNotNull { existing ->
             if (
+                normalizedStyle == "note" ||
                 existing.documentId != documentId ||
                 existing.page != page ||
                 existing.style != normalizedStyle
@@ -142,6 +146,7 @@ class ReaderAnnotationStore(context: Context) {
                             style,
                         ),
                         text = item.optString("text"),
+                        note = item.optString("note"),
                         rects = rects,
                         createdAt = item.optLong("createdAt"),
                     ),
@@ -161,6 +166,7 @@ class ReaderAnnotationStore(context: Context) {
                     put("style", annotation.style)
                     put("color", annotation.color)
                     put("text", annotation.text)
+                    put("note", annotation.note)
                     put("createdAt", annotation.createdAt)
                     put(
                         "rects",
@@ -187,11 +193,17 @@ class ReaderAnnotationStore(context: Context) {
         private const val ANNOTATIONS = "annotations"
         private val ALLOWED_COLORS = setOf("yellow", "green", "blue", "pink", "purple")
 
-        private fun normalizeStyle(style: String): String =
-            style.takeIf { it == "underline" } ?: "highlight"
+        private fun normalizeStyle(style: String): String = when (style) {
+            "underline", "note" -> style
+            else -> "highlight"
+        }
 
         private fun defaultColorFor(style: String): String =
-            if (style == "underline") "blue" else "yellow"
+            when (style) {
+                "underline" -> "blue"
+                "note" -> "purple"
+                else -> "yellow"
+            }
 
         private fun normalizeColor(color: String, style: String): String =
             color.lowercase().takeIf(ALLOWED_COLORS::contains) ?: defaultColorFor(style)

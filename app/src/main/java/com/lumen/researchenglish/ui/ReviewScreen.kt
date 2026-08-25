@@ -87,6 +87,53 @@ import kotlin.math.roundToInt
 
 private enum class ReviewMode { LEARN, REVIEW }
 
+internal fun vocabularyTranslationPreview(markdown: String): String {
+    val lines = markdown.lines().map { line ->
+        line.trim()
+            .removePrefix("#").trim()
+            .removePrefix("**").removeSuffix("**").trim()
+            .removePrefix("_").removeSuffix("_").trim()
+            .replace(Regex("[`*_]+"), "")
+    }
+    fun sectionAfter(marker: (String) -> Boolean): String? {
+        val start = lines.indexOfFirst(marker)
+        if (start < 0) return null
+        return lines.drop(start + 1)
+            .takeWhile { line ->
+                line.isBlank() || !KNOWN_TRANSLATION_HEADINGS.any { heading ->
+                    line.contains(heading, ignoreCase = true)
+                }
+            }
+            .filter(String::isNotBlank)
+            .joinToString(" ")
+            .takeIf(String::isNotBlank)
+    }
+    val natural = sectionAfter { line ->
+        line.contains("自然译文") || line.contains("Natural translation", ignoreCase = true)
+    }
+    val tutor = sectionAfter { line ->
+        line.contains("Tutor 自然译解", ignoreCase = true)
+    }
+    val quick = sectionAfter { line ->
+        line.contains("快速直译") || line.contains("Quick translation", ignoreCase = true)
+    }
+    return (natural ?: tutor ?: quick ?: lines.firstOrNull { line ->
+        line.isNotBlank() && KNOWN_TRANSLATION_HEADINGS.none { heading ->
+            line.contains(heading, ignoreCase = true)
+        }
+    }).orEmpty().take(240)
+}
+
+private val KNOWN_TRANSLATION_HEADINGS = listOf(
+    "快速直译",
+    "Quick translation",
+    "Tutor 自然译解",
+    "自然译文",
+    "Natural translation",
+    "难点点拨",
+    "Reading notes",
+)
+
 @Composable
 fun ReviewScreen(viewModel: AppViewModel) {
     val dueCards by viewModel.dueCards.collectAsStateWithLifecycle()
@@ -103,6 +150,7 @@ fun ReviewScreen(viewModel: AppViewModel) {
     val vocabularyTutorStreamingReply by viewModel.vocabularyTutorStreamingReply.collectAsStateWithLifecycle()
     val vocabularyTutorStreaming by viewModel.vocabularyTutorStreaming.collectAsStateWithLifecycle()
     val vocabularyTutorError by viewModel.vocabularyTutorError.collectAsStateWithLifecycle()
+    val directTranslations by viewModel.directTranslations.collectAsStateWithLifecycle()
     var mode by rememberSaveable { mutableStateOf(ReviewMode.LEARN) }
     var reviewedThisSession by rememberSaveable { mutableIntStateOf(0) }
     var rememberedThisSession by rememberSaveable { mutableIntStateOf(0) }
@@ -165,6 +213,7 @@ fun ReviewScreen(viewModel: AppViewModel) {
                 item {
                     key("${selectedDeck.id}-$deckPosition") {
                         val speechId = "deck-${selectedDeck.id}-$deckPosition"
+                        val actionId = "study-${selectedDeck.id}-$deckPosition"
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             ActiveLearningCard(
                                 word = activeWord,
@@ -173,6 +222,14 @@ fun ReviewScreen(viewModel: AppViewModel) {
                                 speechLoading = speechLoadingId == speechId,
                                 speaking = speakingId == speechId,
                                 onSpeak = { viewModel.speak(activeWord.word, speechId) },
+                                directTranslation = directTranslations[actionId],
+                                onReadSelection = { selected ->
+                                    viewModel.speak(selected, "$actionId-read-${selected.hashCode()}")
+                                },
+                                onTranslateSelection = { selected ->
+                                    viewModel.directTranslate(selected, actionId)
+                                },
+                                onDismissTranslation = { viewModel.clearDirectTranslation(actionId) },
                                 onRate = { rating ->
                                     reviewedThisSession += 1
                                     if (rating == ReviewRating.GOOD || rating == ReviewRating.EASY) {
@@ -201,6 +258,10 @@ fun ReviewScreen(viewModel: AppViewModel) {
                                 onAsk = { question ->
                                     viewModel.askVocabularyTutor(activeWord, question)
                                 },
+                                directTranslations = directTranslations,
+                                onReadText = { text, requestId -> viewModel.speak(text, requestId) },
+                                onTranslateText = viewModel::directTranslate,
+                                onDismissTranslation = viewModel::clearDirectTranslation,
                             )
                         }
                     }
@@ -235,6 +296,7 @@ fun ReviewScreen(viewModel: AppViewModel) {
                     item {
                         key("manual-${manualPracticeCard.id}-$manualPracticeIndex") {
                             val speechId = "practice-${manualPracticeCard.id}"
+                            val actionId = "practice-content-${manualPracticeCard.id}"
                             SavedVocabularyCard(
                                 card = manualPracticeCard,
                                 position = manualPracticeIndex % manualPracticeQueue.size + 1,
@@ -242,6 +304,14 @@ fun ReviewScreen(viewModel: AppViewModel) {
                                 speechLoading = speechLoadingId == speechId,
                                 speaking = speakingId == speechId,
                                 onSpeak = { viewModel.speak(manualPracticeCard.term, speechId) },
+                                directTranslation = directTranslations[actionId],
+                                onReadSelection = { selected ->
+                                    viewModel.speak(selected, "$actionId-read-${selected.hashCode()}")
+                                },
+                                onTranslateSelection = { selected ->
+                                    viewModel.directTranslate(selected, actionId)
+                                },
+                                onDismissTranslation = { viewModel.clearDirectTranslation(actionId) },
                                 onRate = { rating ->
                                     reviewedThisSession += 1
                                     if (rating == ReviewRating.GOOD || rating == ReviewRating.EASY) {
@@ -260,6 +330,7 @@ fun ReviewScreen(viewModel: AppViewModel) {
                     key(dueCards.first().id) {
                         val card = dueCards.first()
                         val speechId = "review-${card.id}"
+                        val actionId = "review-content-${card.id}"
                         SavedVocabularyCard(
                             card = card,
                             position = reviewedThisSession + 1,
@@ -267,6 +338,14 @@ fun ReviewScreen(viewModel: AppViewModel) {
                             speechLoading = speechLoadingId == speechId,
                             speaking = speakingId == speechId,
                             onSpeak = { viewModel.speak(card.term, speechId) },
+                            directTranslation = directTranslations[actionId],
+                            onReadSelection = { selected ->
+                                viewModel.speak(selected, "$actionId-read-${selected.hashCode()}")
+                            },
+                            onTranslateSelection = { selected ->
+                                viewModel.directTranslate(selected, actionId)
+                            },
+                            onDismissTranslation = { viewModel.clearDirectTranslation(actionId) },
                             onRate = { rating ->
                                 reviewedThisSession += 1
                                 if (rating == ReviewRating.GOOD || rating == ReviewRating.EASY) {
@@ -292,12 +371,21 @@ fun ReviewScreen(viewModel: AppViewModel) {
             }
             items(allCards.take(60), key = { it.id }) { card ->
                 val speechId = "word-list-${card.id}"
+                val actionId = "word-list-content-${card.id}"
                 WordMemoryCard(
                     card = card,
                     now = reviewNow,
                     speechLoading = speechLoadingId == speechId,
                     speaking = speakingId == speechId,
                     onSpeak = { viewModel.speak(card.term, speechId) },
+                    directTranslation = directTranslations[actionId],
+                    onReadSelection = { selected ->
+                        viewModel.speak(selected, "$actionId-read-${selected.hashCode()}")
+                    },
+                    onTranslateSelection = { selected ->
+                        viewModel.directTranslate(selected, actionId)
+                    },
+                    onDismissTranslation = { viewModel.clearDirectTranslation(actionId) },
                 )
             }
         }
@@ -474,6 +562,10 @@ private fun ActiveLearningCard(
     speechLoading: Boolean,
     speaking: Boolean,
     onSpeak: () -> Unit,
+    directTranslation: DirectTranslationUiState?,
+    onReadSelection: (String) -> Unit,
+    onTranslateSelection: (String) -> Unit,
+    onDismissTranslation: () -> Unit,
     onRate: (ReviewRating) -> Unit,
 ) {
     val details = buildList {
@@ -498,6 +590,10 @@ private fun ActiveLearningCard(
         speechLoading = speechLoading,
         speaking = speaking,
         onSpeak = onSpeak,
+        directTranslation = directTranslation,
+        onReadSelection = onReadSelection,
+        onTranslateSelection = onTranslateSelection,
+        onDismissTranslation = onDismissTranslation,
         onRate = onRate,
     )
 }
@@ -510,6 +606,10 @@ private fun VocabularyTutorCard(
     streaming: Boolean,
     error: String?,
     onAsk: (String) -> Unit,
+    directTranslations: Map<String, DirectTranslationUiState>,
+    onReadText: (String, String) -> Unit,
+    onTranslateText: (String, String) -> Unit,
+    onDismissTranslation: (String) -> Unit,
 ) {
     var expanded by remember(word.word) { mutableStateOf(false) }
     var input by remember(word.word) { mutableStateOf("") }
@@ -532,6 +632,13 @@ private fun VocabularyTutorCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.labelSmall,
                     )
+                    if (expanded) {
+                        Text(
+                            "Select reply text for Read / 直接翻译",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
                 }
                 TextButton(onClick = { expanded = !expanded }) {
                     Text(if (expanded) "Hide" else "Chat")
@@ -552,6 +659,7 @@ private fun VocabularyTutorCard(
                 }
                 messages.takeLast(6).forEach { message ->
                     val isUser = message.role == "user"
+                    val actionId = "word-tutor-${message.id}"
                     Card(
                         colors = CardDefaults.cardColors(
                             containerColor = if (isUser) Indigo.copy(alpha = 0.12f)
@@ -559,30 +667,50 @@ private fun VocabularyTutorCard(
                         ),
                         shape = RoundedCornerShape(14.dp),
                     ) {
-                        Text(
-                            text = renderTutorMarkdown(
-                                markdown = message.content,
-                                accentColor = Indigo,
-                                codeBackground = MaterialTheme.colorScheme.surfaceVariant,
-                            ),
-                            modifier = Modifier.padding(12.dp),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                        Column(Modifier.padding(12.dp)) {
+                            SelectableActionText(
+                                text = tutorMarkdownPlainText(message.content),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontSize = MaterialTheme.typography.bodyMedium.fontSize,
+                                onRead = { selected ->
+                                    onReadText(selected, "$actionId-read-${selected.hashCode()}")
+                                },
+                                onTranslate = { selected -> onTranslateText(selected, actionId) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            InlineDirectTranslation(
+                                state = directTranslations[actionId],
+                                onDismiss = { onDismissTranslation(actionId) },
+                                modifier = Modifier.padding(top = 7.dp),
+                            )
+                        }
                     }
                 }
                 if (streaming) {
+                    val actionId = "word-tutor-streaming"
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         shape = RoundedCornerShape(14.dp),
                     ) {
-                        Text(
-                            text = renderTutorMarkdown(
-                                markdown = streamingReply.ifBlank { "Qwen Tutor is thinking…" },
-                                accentColor = Indigo,
-                                codeBackground = MaterialTheme.colorScheme.surfaceVariant,
-                            ),
-                            modifier = Modifier.padding(12.dp),
-                        )
+                        Column(Modifier.padding(12.dp)) {
+                            SelectableActionText(
+                                text = tutorMarkdownPlainText(
+                                    streamingReply.ifBlank { "Qwen Tutor is thinking…" },
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontSize = MaterialTheme.typography.bodyMedium.fontSize,
+                                onRead = { selected ->
+                                    onReadText(selected, "$actionId-read-${selected.hashCode()}")
+                                },
+                                onTranslate = { selected -> onTranslateText(selected, actionId) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            InlineDirectTranslation(
+                                state = directTranslations[actionId],
+                                onDismiss = { onDismissTranslation(actionId) },
+                                modifier = Modifier.padding(top = 7.dp),
+                            )
+                        }
                     }
                 }
                 error?.let {
@@ -626,12 +754,17 @@ private fun SavedVocabularyCard(
     speechLoading: Boolean,
     speaking: Boolean,
     onSpeak: () -> Unit,
+    directTranslation: DirectTranslationUiState?,
+    onReadSelection: (String) -> Unit,
+    onTranslateSelection: (String) -> Unit,
+    onDismissTranslation: () -> Unit,
     onRate: (ReviewRating) -> Unit,
 ) {
     StudyCard(
         identity = card.id,
         term = card.term,
-        definition = card.translation.ifBlank { "No definition saved" },
+        definition = vocabularyTranslationPreview(card.translation)
+            .ifBlank { card.translation.ifBlank { "No definition saved" } },
         context = card.context,
         meta = listOf(card.sourceTitle, card.sourcePage.takeIf { it > 0 }?.let { "p. $it" })
             .filterNotNull().filter { it.isNotBlank() }.joinToString(" · "),
@@ -641,6 +774,10 @@ private fun SavedVocabularyCard(
         speechLoading = speechLoading,
         speaking = speaking,
         onSpeak = onSpeak,
+        directTranslation = directTranslation,
+        onReadSelection = onReadSelection,
+        onTranslateSelection = onTranslateSelection,
+        onDismissTranslation = onDismissTranslation,
         onRate = onRate,
     )
 }
@@ -658,6 +795,10 @@ private fun StudyCard(
     speechLoading: Boolean,
     speaking: Boolean,
     onSpeak: () -> Unit,
+    directTranslation: DirectTranslationUiState?,
+    onReadSelection: (String) -> Unit,
+    onTranslateSelection: (String) -> Unit,
+    onDismissTranslation: () -> Unit,
     onRate: (ReviewRating) -> Unit,
 ) {
     var revealed by remember(identity) { mutableStateOf(false) }
@@ -675,13 +816,26 @@ private fun StudyCard(
         ) {
             Text("$position / $total", color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(if (revealed) 20.dp else 58.dp))
-            Text(
-                term,
-                fontFamily = FontFamily.Serif,
-                fontSize = if (revealed) 34.sp else 42.sp,
-                fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Center,
-            )
+            if (revealed) {
+                SelectableActionText(
+                    text = term,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 34.sp,
+                    bold = true,
+                    centered = true,
+                    onRead = onReadSelection,
+                    onTranslate = onTranslateSelection,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                Text(
+                    term,
+                    fontFamily = FontFamily.Serif,
+                    fontSize = 42.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                )
+            }
             SpeechButton(speechLoading, speaking, onSpeak)
             if (!revealed) {
                 Spacer(Modifier.weight(1f))
@@ -693,16 +847,24 @@ private fun StudyCard(
                     Text(meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Spacer(Modifier.height(16.dp))
-                Text(
-                    definition,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.SemiBold,
+                SelectableActionText(
+                    text = definition,
                     color = Indigo,
-                    textAlign = TextAlign.Center,
+                    fontSize = 20.sp,
+                    onRead = onReadSelection,
+                    onTranslate = onTranslateSelection,
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 if (extra.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
-                    Text(extra, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    SelectableActionText(
+                        text = extra,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = MaterialTheme.typography.bodyMedium.fontSize,
+                        onRead = onReadSelection,
+                        onTranslate = onTranslateSelection,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
                 if (context.isNotBlank()) {
                     Spacer(Modifier.height(18.dp))
@@ -710,9 +872,23 @@ private fun StudyCard(
                         colors = CardDefaults.cardColors(containerColor = SoftIndigo),
                         shape = RoundedCornerShape(18.dp),
                     ) {
-                        Text(context, modifier = Modifier.padding(16.dp), lineHeight = 22.sp)
+                        SelectableActionText(
+                            text = context,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = MaterialTheme.typography.bodyMedium.fontSize,
+                            onRead = onReadSelection,
+                            onTranslate = onTranslateSelection,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                        )
                     }
                 }
+                InlineDirectTranslation(
+                    state = directTranslation,
+                    onDismiss = onDismissTranslation,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
                 Spacer(Modifier.weight(1f))
                 Spacer(Modifier.height(20.dp))
                 RecallButtons(onRate)
@@ -863,6 +1039,10 @@ private fun WordMemoryCard(
     speechLoading: Boolean,
     speaking: Boolean,
     onSpeak: () -> Unit,
+    directTranslation: DirectTranslationUiState?,
+    onReadSelection: (String) -> Unit,
+    onTranslateSelection: (String) -> Unit,
+    onDismissTranslation: () -> Unit,
 ) {
     val stage = MemoryModel.stage(card, now)
     val stageColor = when (stage) {
@@ -879,13 +1059,23 @@ private fun WordMemoryCard(
         Column(Modifier.padding(17.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(card.term, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        card.translation.ifBlank { card.context.take(100) },
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                    SelectableActionText(
+                        text = card.term,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 20.sp,
+                        bold = true,
+                        onRead = onReadSelection,
+                        onTranslate = onTranslateSelection,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    SelectableActionText(
+                        text = vocabularyTranslationPreview(card.translation)
+                            .ifBlank { card.context.take(180) },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = MaterialTheme.typography.bodySmall.fontSize,
+                        onRead = onReadSelection,
+                        onTranslate = onTranslateSelection,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 SpeechButton(speechLoading, speaking, onSpeak, compact = true)
@@ -902,6 +1092,11 @@ private fun WordMemoryCard(
                     Text(stage.label, color = stageColor, style = MaterialTheme.typography.labelSmall)
                 }
             }
+            InlineDirectTranslation(
+                state = directTranslation,
+                onDismiss = onDismissTranslation,
+                modifier = Modifier.padding(top = 9.dp),
+            )
             Spacer(Modifier.height(11.dp))
             LinearProgressIndicator(
                 progress = { MemoryModel.strength(card, now) },
