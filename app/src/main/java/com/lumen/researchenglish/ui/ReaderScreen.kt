@@ -58,6 +58,9 @@ import androidx.compose.material.icons.outlined.Bookmarks
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.DragIndicator
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.FormatColorFill
 import androidx.compose.material.icons.outlined.FormatUnderlined
 import androidx.compose.material.icons.outlined.Headphones
@@ -96,6 +99,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -931,12 +935,20 @@ private fun PositionAwareSelectionLayer(
         }
 
         if (selectedWords.isNotEmpty() && selectedSource.isNotBlank()) {
+            var cardCollapsed by remember(selectedWords.firstOrNull()) { mutableStateOf(false) }
+            var cardDragOffset by remember(selectedWords.firstOrNull()) {
+                mutableStateOf(Offset.Zero)
+            }
             val panelWidthPx = min(
                 with(density) { 360.dp.toPx() },
                 containerWidthPx - with(density) { 20.dp.toPx() },
             ).coerceAtLeast(with(density) { 250.dp.toPx() })
             val estimatedPanelHeight = with(density) {
-                (if (translationExpanded) 440.dp else 238.dp).toPx()
+                when {
+                    cardCollapsed -> 64.dp
+                    translationExpanded -> 440.dp
+                    else -> 238.dp
+                }.toPx()
             }
             val horizontalMargin = with(density) { 10.dp.toPx() }
             val verticalMargin = with(density) { 10.dp.toPx() }
@@ -958,15 +970,24 @@ private fun PositionAwareSelectionLayer(
                 (containerWidthPx - panelWidthPx - horizontalMargin)
                     .coerceAtLeast(horizontalMargin),
             )
-            val desiredY = if (selectionTop > estimatedPanelHeight + verticalMargin * 2f) {
-                selectionTop - estimatedPanelHeight - verticalMargin
-            } else {
-                selectionBottom + verticalMargin
-            }
-            val panelY = desiredY.coerceIn(
+            val dockedPanelY = selectionPanelDockY(
+                containerHeightPx = containerHeightPx,
+                panelHeightPx = estimatedPanelHeight,
+                selectionTopPx = selectionTop,
+                selectionBottomPx = selectionBottom,
+                marginPx = verticalMargin,
+            )
+            val maxPanelX = (containerWidthPx - panelWidthPx - horizontalMargin)
+                .coerceAtLeast(horizontalMargin)
+            val maxPanelY = (containerHeightPx - estimatedPanelHeight - verticalMargin)
+                .coerceAtLeast(verticalMargin)
+            val draggedPanelX = (panelX + cardDragOffset.x).coerceIn(
+                horizontalMargin,
+                maxPanelX,
+            )
+            val draggedPanelY = (dockedPanelY + cardDragOffset.y).coerceIn(
                 verticalMargin,
-                (containerHeightPx - estimatedPanelHeight - verticalMargin)
-                    .coerceAtLeast(verticalMargin),
+                maxPanelY,
             )
 
             SelectionActionCard(
@@ -977,6 +998,7 @@ private fun PositionAwareSelectionLayer(
                 translationExpanded = translationExpanded,
                 selectionNotes = selectionNotes,
                 selectionSpeaking = selectionSpeaking,
+                collapsed = cardCollapsed,
                 onToggleLine = onToggleLine,
                 onHighlight = onHighlight,
                 onRemoveHighlight = onRemoveHighlight,
@@ -989,9 +1011,16 @@ private fun PositionAwareSelectionLayer(
                 onAddManualNote = onAddManualNote,
                 onAddTranslationNote = onAddTranslationNote,
                 onRemoveNotes = onRemoveNotes,
+                onToggleCollapsed = {
+                    cardCollapsed = !cardCollapsed
+                    cardDragOffset = Offset.Zero
+                },
+                onDrag = { amount -> cardDragOffset += amount },
                 onClose = onClose,
                 modifier = Modifier
-                    .offset { IntOffset(panelX.roundToInt(), panelY.roundToInt()) }
+                    .offset {
+                        IntOffset(draggedPanelX.roundToInt(), draggedPanelY.roundToInt())
+                    }
                     .width(with(density) { panelWidthPx.toDp() }),
             )
         }
@@ -1007,6 +1036,7 @@ private fun SelectionActionCard(
     translationExpanded: Boolean,
     selectionNotes: List<ReaderAnnotation>,
     selectionSpeaking: Boolean,
+    collapsed: Boolean,
     onToggleLine: () -> Unit,
     onHighlight: (String) -> Unit,
     onRemoveHighlight: () -> Unit,
@@ -1019,6 +1049,8 @@ private fun SelectionActionCard(
     onAddManualNote: () -> Unit,
     onAddTranslationNote: () -> Unit,
     onRemoveNotes: () -> Unit,
+    onToggleCollapsed: () -> Unit,
+    onDrag: (Offset) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1036,100 +1068,117 @@ private fun SelectionActionCard(
     ) {
         Column(
             Modifier
-                .heightIn(max = 460.dp)
+                .heightIn(max = if (collapsed) 72.dp else 460.dp)
                 .verticalScroll(cardScroll)
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
+                Icon(
+                    Icons.Outlined.DragIndicator,
+                    contentDescription = "Drag selection actions",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
-                        .size(width = 4.dp, height = 34.dp)
-                        .clip(CircleShape)
-                        .background(Indigo),
+                        .size(30.dp)
+                        .pointerInput(Unit) {
+                            detectDragGestures { change, dragAmount ->
+                                change.consume()
+                                onDrag(dragAmount)
+                            }
+                        },
                 )
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(4.dp))
                 Text(
                     source,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = if (lineMode) 3 else 2,
+                    maxLines = if (collapsed) 1 else if (lineMode) 3 else 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
                         .weight(1f),
                 )
-                Surface(
-                    color = Indigo.copy(alpha = 0.1f),
-                    shape = CircleShape,
-                    modifier = Modifier.clickable(onClick = onToggleLine),
-                ) {
-                    Text(
-                        if (lineMode) "Word" else "Line",
-                        color = Indigo,
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
-                    )
+                if (!collapsed) {
+                    Surface(
+                        color = Indigo.copy(alpha = 0.1f),
+                        shape = CircleShape,
+                        modifier = Modifier.clickable(onClick = onToggleLine),
+                    ) {
+                        Text(
+                            if (lineMode) "Word" else "Line",
+                            color = Indigo,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                        )
+                    }
                 }
                 Spacer(Modifier.width(2.dp))
+                IconButton(onClick = onToggleCollapsed, modifier = Modifier.size(34.dp)) {
+                    Icon(
+                        if (collapsed) Icons.Outlined.ExpandMore else Icons.Outlined.ExpandLess,
+                        if (collapsed) "Show selection actions" else "Hide selection actions",
+                    )
+                }
                 IconButton(onClick = onClose, modifier = Modifier.size(34.dp)) {
                     Icon(Icons.Outlined.Close, "Close selection")
                 }
             }
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 5.dp),
-            ) {
-                SelectionTool(
-                    Icons.Outlined.Translate,
-                    "Translate",
-                    onTranslate,
-                    emphasized = true,
-                    modifier = Modifier.weight(1f),
-                )
-                SelectionTool(
-                    Icons.Outlined.School,
-                    "Ask Tutor",
-                    onAskTutor,
-                    modifier = Modifier.weight(1f),
-                )
-                SelectionTool(
-                    Icons.AutoMirrored.Outlined.VolumeUp,
-                    if (selectionSpeaking) "Stop" else "Read",
-                    onSpeak,
-                    active = selectionSpeaking,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                AnnotationStyleTool(
-                    icon = Icons.Outlined.FormatColorFill,
-                    label = "Highlight",
-                    removeLabel = "Remove highlight",
-                    onColor = onHighlight,
-                    onRemove = onRemoveHighlight,
-                    modifier = Modifier.weight(1f),
-                )
-                AnnotationStyleTool(
-                    icon = Icons.Outlined.FormatUnderlined,
-                    label = "Underline",
-                    removeLabel = "Remove underline",
-                    onColor = onUnderline,
-                    onRemove = onRemoveUnderline,
-                    modifier = Modifier.weight(1f),
-                )
-                SelectionTool(
-                    Icons.Outlined.AddCircleOutline,
-                    "Note",
-                    onAddManualNote,
-                    modifier = Modifier.weight(1f),
-                )
+            if (!collapsed) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 5.dp),
+                ) {
+                    SelectionTool(
+                        Icons.Outlined.Translate,
+                        "Translate",
+                        onTranslate,
+                        emphasized = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    SelectionTool(
+                        Icons.Outlined.School,
+                        "Ask Tutor",
+                        onAskTutor,
+                        modifier = Modifier.weight(1f),
+                    )
+                    SelectionTool(
+                        Icons.AutoMirrored.Outlined.VolumeUp,
+                        if (selectionSpeaking) "Stop" else "Read",
+                        onSpeak,
+                        active = selectionSpeaking,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    AnnotationStyleTool(
+                        icon = Icons.Outlined.FormatColorFill,
+                        label = "Highlight",
+                        removeLabel = "Remove highlight",
+                        onColor = onHighlight,
+                        onRemove = onRemoveHighlight,
+                        modifier = Modifier.weight(1f),
+                    )
+                    AnnotationStyleTool(
+                        icon = Icons.Outlined.FormatUnderlined,
+                        label = "Underline",
+                        removeLabel = "Remove underline",
+                        onColor = onUnderline,
+                        onRemove = onRemoveUnderline,
+                        modifier = Modifier.weight(1f),
+                    )
+                    SelectionTool(
+                        Icons.Outlined.AddCircleOutline,
+                        "Note",
+                        onAddManualNote,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
 
-            if (selectionNotes.isNotEmpty()) {
+            if (!collapsed && selectionNotes.isNotEmpty()) {
                 Surface(
                     color = annotationColor("purple").copy(alpha = 0.12f),
                     shape = RoundedCornerShape(12.dp),
@@ -1153,7 +1202,7 @@ private fun SelectionActionCard(
                 }
             }
 
-            if (translationExpanded) {
+            if (!collapsed && translationExpanded) {
                 Surface(
                     color = Indigo.copy(alpha = 0.07f),
                     shape = RoundedCornerShape(14.dp),
@@ -1718,6 +1767,20 @@ private data class PageMetrics(
 ) {
     fun x(value: Float): Float = centerX + (value - centerX) * scale + offsetX
     fun y(value: Float): Float = centerY + (value - centerY) * scale + offsetY
+}
+
+internal fun selectionPanelDockY(
+    containerHeightPx: Float,
+    panelHeightPx: Float,
+    selectionTopPx: Float,
+    selectionBottomPx: Float,
+    marginPx: Float,
+): Float {
+    val topDock = marginPx
+    val bottomDock = (containerHeightPx - panelHeightPx - marginPx)
+        .coerceAtLeast(marginPx)
+    val selectionCenter = (selectionTopPx + selectionBottomPx) / 2f
+    return if (selectionCenter <= containerHeightPx / 2f) bottomDock else topDock
 }
 
 private fun pageMetrics(

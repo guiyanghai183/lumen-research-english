@@ -14,8 +14,8 @@ android {
         applicationId = "com.lumen.researchenglish"
         minSdk = 28
         targetSdk = 35
-        versionCode = 26
-        versionName = "1.4.8"
+        versionCode = 27
+        versionName = "1.4.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
