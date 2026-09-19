@@ -87,7 +87,7 @@ import kotlin.math.roundToInt
 
 private enum class ReviewMode { LEARN, REVIEW }
 
-internal fun vocabularyTranslationPreview(markdown: String): String {
+internal fun vocabularyTranslationPreview(markdown: String, preferQuick: Boolean = false): String {
     val lines = markdown.lines().map { line ->
         line.trim()
             .removePrefix("#").trim()
@@ -117,7 +117,14 @@ internal fun vocabularyTranslationPreview(markdown: String): String {
     val quick = sectionAfter { line ->
         line.contains("快速直译") || line.contains("Quick translation", ignoreCase = true)
     }
-    return (natural ?: tutor ?: quick ?: lines.firstOrNull { line ->
+    val contextualMeaning = sectionAfter { line ->
+        line.contains("语境义") || line.contains("Contextual meaning", ignoreCase = true)
+    }
+    return ((if (preferQuick) {
+        contextualMeaning ?: quick ?: natural ?: tutor
+    } else {
+        natural ?: tutor ?: quick ?: contextualMeaning
+    }) ?: lines.firstOrNull { line ->
         line.isNotBlank() && KNOWN_TRANSLATION_HEADINGS.none { heading ->
             line.contains(heading, ignoreCase = true)
         }
@@ -132,6 +139,12 @@ private val KNOWN_TRANSLATION_HEADINGS = listOf(
     "Natural translation",
     "难点点拨",
     "Reading notes",
+    "语境义",
+    "Contextual meaning",
+    "常见义项",
+    "Common senses",
+    "例句",
+    "Examples",
 )
 
 @Composable
@@ -763,7 +776,10 @@ private fun SavedVocabularyCard(
     StudyCard(
         identity = card.id,
         term = card.term,
-        definition = vocabularyTranslationPreview(card.translation)
+        definition = vocabularyTranslationPreview(
+            markdown = card.translation,
+            preferQuick = isLexicalSelection(card.term),
+        )
             .ifBlank { card.translation.ifBlank { "No definition saved" } },
         context = card.context,
         meta = listOf(card.sourceTitle, card.sourcePage.takeIf { it > 0 }?.let { "p. $it" })
@@ -1069,7 +1085,10 @@ private fun WordMemoryCard(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     SelectableActionText(
-                        text = vocabularyTranslationPreview(card.translation)
+                        text = vocabularyTranslationPreview(
+                            markdown = card.translation,
+                            preferQuick = isLexicalSelection(card.term),
+                        )
                             .ifBlank { card.context.take(180) },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = MaterialTheme.typography.bodySmall.fontSize,

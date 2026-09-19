@@ -68,9 +68,16 @@ class ReaderTranslationCache(context: Context) {
     companion object {
         private const val INDEX = "index"
         private const val MAX_ENTRIES = 200
+        private const val CACHE_SCHEMA_VERSION = "v2-lexical-selection"
 
         internal fun cacheKey(documentId: String, page: Int, provider: String, text: String): String {
-            val normalized = listOf(documentId, page.toString(), provider, text.trim())
+            val normalized = listOf(
+                CACHE_SCHEMA_VERSION,
+                documentId,
+                page.toString(),
+                provider,
+                text.trim(),
+            )
                 .joinToString("\u001f")
             val digest = MessageDigest.getInstance("SHA-256").digest(normalized.toByteArray())
             return "translation_" + digest.joinToString("") { "%02x".format(it) }

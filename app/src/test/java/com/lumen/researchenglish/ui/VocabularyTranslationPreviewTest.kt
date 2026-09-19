@@ -34,4 +34,38 @@ class VocabularyTranslationPreviewTest {
 
         assertEquals("区别；差别；卓越。", vocabularyTranslationPreview(markdown))
     }
+
+    @Test
+    fun phraseCardPrefersQuickTermDefinitionOverSurroundingSentenceTranslation() {
+        val markdown = """
+            **快速直译 / Quick translation**
+            在……的情况下。
+
+            **Tutor 自然译解 · Alibaba Qwen3.7 Flash**
+            **自然译文 / Natural translation**
+            对于那批数量不多且深受个人喜爱的作者而言，这一区分带来了一个有趣的后果。
+        """.trimIndent()
+
+        assertEquals(
+            "在……的情况下。",
+            vocabularyTranslationPreview(markdown, preferQuick = true),
+        )
+    }
+
+    @Test
+    fun phraseCardUsesContextualMeaningWhenQuickTranslationIsUnavailable() {
+        val markdown = """
+            Tutor 自然译解 · Alibaba Qwen3.7 Flash
+            语境义 / Contextual meaning
+            in the case of：在……的情况下；就……而言。
+
+            常见义项 / Common senses
+            用于限定所讨论的情形或对象。
+        """.trimIndent()
+
+        assertEquals(
+            "in the case of：在……的情况下；就……而言。",
+            vocabularyTranslationPreview(markdown, preferQuick = true),
+        )
+    }
 }

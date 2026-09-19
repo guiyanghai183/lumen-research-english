@@ -45,4 +45,20 @@ class DailyCheckInTest {
         assertEquals(3, stats.longestStreak)
         assertEquals(4, stats.totalDays)
     }
+
+    @Test
+    fun `study progress follows the forty minute daily goal and is capped`() {
+        val stats = DailyCheckIn.stats(
+            checkInDates = setOf(today),
+            today = today,
+            studyMillisByDate = mapOf(
+                today to 10L * 60_000L,
+                today.minusDays(1) to 55L * 60_000L,
+            ),
+        )
+
+        assertEquals(10L * 60_000L, stats.todayStudyMillis)
+        assertEquals(0.25f, stats.progressFor(today), 0.0001f)
+        assertEquals(1f, stats.progressFor(today.minusDays(1)), 0.0001f)
+    }
 }

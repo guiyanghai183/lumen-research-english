@@ -90,7 +90,11 @@ class ProfileStore(context: Context) {
     }
 
     fun getDailyCheckInStats(today: LocalDate = LocalDate.now()): DailyCheckInStats =
-        DailyCheckIn.stats(getCheckInDates(), today)
+        DailyCheckIn.stats(
+            checkInDates = getCheckInDates(),
+            today = today,
+            studyMillisByDate = getStudyMillisByDate(),
+        )
 
     /** Returns true only when a new date was added. */
     @Synchronized
@@ -101,6 +105,22 @@ class ProfileStore(context: Context) {
             .putStringSet(CHECK_IN_DATES, dates.map(LocalDate::toString).toSet())
             .apply()
         return true
+    }
+
+    @Synchronized
+    fun addStudyMillis(durationMillis: Long, date: LocalDate = LocalDate.now()): Long {
+        if (durationMillis <= 0L) return getStudyMillisByDate()[date] ?: 0L
+        val studyByDate = getStudyMillisByDate().toMutableMap()
+        val updated = ((studyByDate[date] ?: 0L) + durationMillis)
+            .coerceAtMost(MAX_STUDY_MILLIS_PER_DAY)
+        studyByDate[date] = updated
+        preferences.edit()
+            .putStringSet(
+                STUDY_MILLIS_BY_DATE,
+                studyByDate.entries.map { (day, millis) -> "$day|$millis" }.toSet(),
+            )
+            .apply()
+        return updated
     }
 
     fun getChatHistoryLimit(): Int =
@@ -139,6 +159,20 @@ class ProfileStore(context: Context) {
             .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }
             .toSet()
 
+    private fun getStudyMillisByDate(): Map<LocalDate, Long> =
+        preferences.getStringSet(STUDY_MILLIS_BY_DATE, emptySet())
+            .orEmpty()
+            .mapNotNull { entry ->
+                val separator = entry.lastIndexOf('|')
+                if (separator <= 0) return@mapNotNull null
+                val date = runCatching { LocalDate.parse(entry.substring(0, separator)) }.getOrNull()
+                    ?: return@mapNotNull null
+                val millis = entry.substring(separator + 1).toLongOrNull()?.coerceAtLeast(0L)
+                    ?: return@mapNotNull null
+                date to millis
+            }
+            .toMap()
+
     companion object {
         const val DEFAULT_VOICE_TYPE = 502004
         const val DEFAULT_UPDATE_SOURCE = "https://github.com/guiyanghai183/lumen-research-english"
@@ -157,6 +191,8 @@ class ProfileStore(context: Context) {
         private const val HIGHEST_READ_PAGE_PREFIX = "highest_read_page_"
         private const val BOOK_COMPLETED_PREFIX = "book_completed_"
         private const val CHECK_IN_DATES = "daily_check_in_dates"
+        private const val STUDY_MILLIS_BY_DATE = "daily_study_millis_by_date"
+        private const val MAX_STUDY_MILLIS_PER_DAY = 24L * 60L * 60L * 1_000L
         private const val CHAT_HISTORY_LIMIT = "chat_history_limit"
         private const val MEMORY_UPDATE_FREQUENCY = "memory_update_frequency"
         private const val TUTOR_API_PROVIDER = "tutor_api_provider"

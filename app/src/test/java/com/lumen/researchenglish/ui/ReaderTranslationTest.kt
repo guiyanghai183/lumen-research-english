@@ -24,7 +24,7 @@ class ReaderTranslationTest {
             selection = "These findings should be interpreted with caution.",
             quickTranslation = "这些发现应谨慎解释。",
             nearbyContext = "The sample was small. These findings should be interpreted with caution.",
-            singleWord = false,
+            lexicalSelection = false,
         )
 
         assertTrue(prompt.contains("Translate the selected research-English passage"))
@@ -35,16 +35,38 @@ class ReaderTranslationTest {
     }
 
     @Test
-    fun `single word prompt retains dictionary behavior`() {
+    fun `word prompt retains dictionary behavior`() {
         val prompt = readerTranslationPrompt(
             selection = "robust",
             quickTranslation = "稳健的",
             nearbyContext = "The model is robust to perturbations.",
-            singleWord = true,
+            lexicalSelection = true,
         )
 
         assertTrue(prompt.contains("dictionary note"))
-        assertTrue(prompt.contains("<selected_word>"))
+        assertTrue(prompt.contains("<selected_term>"))
         assertFalse(prompt.contains("<selected_passage>"))
+    }
+
+    @Test
+    fun `phrase prompt defines only selected term and treats context as disambiguation`() {
+        val prompt = readerTranslationPrompt(
+            selection = "in the case of",
+            quickTranslation = "在……的情况下",
+            nearbyContext = "This distinction applies in the case of a small sample.",
+            lexicalSelection = true,
+        )
+
+        assertTrue(isLexicalSelection("in the case of"))
+        assertTrue(prompt.contains("word or phrase"))
+        assertTrue(prompt.contains("Define and translate only the selected term"))
+        assertTrue(prompt.contains("<selected_term>"))
+        assertTrue(prompt.contains("in the case of"))
+        assertTrue(prompt.contains("</selected_term>"))
+    }
+
+    @Test
+    fun `full sentence is not treated as a vocabulary phrase`() {
+        assertFalse(isLexicalSelection("These findings should be interpreted with caution."))
     }
 }

@@ -10,6 +10,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,7 +46,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -176,10 +176,7 @@ fun LibraryScreen(
         }
 
         item {
-            DailyCheckInCard(
-                stats = dailyCheckIn,
-                onCheckIn = viewModel::checkInToday,
-            )
+            DailyCheckInCard(stats = dailyCheckIn)
         }
 
         item {
@@ -249,7 +246,6 @@ fun LibraryScreen(
 @Composable
 private fun DailyCheckInCard(
     stats: DailyCheckInStats,
-    onCheckIn: () -> Unit,
 ) {
     var displayedMonth by remember { mutableStateOf(YearMonth.now()) }
     Card(
@@ -279,15 +275,15 @@ private fun DailyCheckInCard(
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (stats.checkedInToday) "Checked in for today" else "Daily check-in",
+                        if (stats.checkedInToday) "Automatically checked in" else "Preparing today's check-in",
                         fontSize = 19.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
                         if (stats.checkedInToday) {
-                            "Nice work — come back tomorrow to keep the streak going."
+                            "Learning time is tracked while Lumen is open. Today's goal is 40 minutes."
                         } else {
-                            "Build a steady reading habit and earn 10 XP."
+                            "Your daily check-in is completed automatically when the app opens."
                         },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
@@ -318,16 +314,39 @@ private fun DailyCheckInCard(
                     label = "best streak",
                     modifier = Modifier.weight(1f),
                 )
-                FilledTonalButton(
-                    onClick = onCheckIn,
-                    enabled = !stats.checkedInToday,
-                ) {
-                    Text(if (stats.checkedInToday) "Done" else "Check in")
-                }
             }
+            val todayMinutes = stats.todayStudyMillis / 60_000L
+            val todayProgress = stats.progressFor(stats.today)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    "Today's learning",
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "$todayMinutes / 40 min",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+            LinearProgressIndicator(
+                progress = { todayProgress },
+                color = Color(0xFF2E9463),
+                trackColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(CircleShape),
+            )
             CheckInCalendar(
                 month = displayedMonth,
                 checkedDates = stats.checkInDates,
+                studyMillisByDate = stats.studyMillisByDate,
+                dailyGoalMillis = stats.dailyGoalMillis,
                 onPreviousMonth = { displayedMonth = displayedMonth.minusMonths(1) },
                 onNextMonth = { displayedMonth = displayedMonth.plusMonths(1) },
             )
@@ -339,6 +358,8 @@ private fun DailyCheckInCard(
 private fun CheckInCalendar(
     month: YearMonth,
     checkedDates: Set<LocalDate>,
+    studyMillisByDate: Map<LocalDate, Long>,
+    dailyGoalMillis: Long,
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
 ) {
@@ -380,6 +401,13 @@ private fun CheckInCalendar(
             Row(Modifier.fillMaxWidth()) {
                 week.forEach { date ->
                     val checked = date in checkedDates
+                    val progress = if (dailyGoalMillis > 0L) {
+                        ((studyMillisByDate[date] ?: 0L).toDouble() / dailyGoalMillis)
+                            .coerceIn(0.0, 1.0)
+                            .toFloat()
+                    } else {
+                        0f
+                    }
                     val isToday = date == today
                     val inMonth = YearMonth.from(date) == month
                     Box(
@@ -392,28 +420,39 @@ private fun CheckInCalendar(
                             .then(
                                 if (isToday) Modifier.border(1.5.dp, Indigo, CircleShape)
                                 else Modifier,
-                            )
-                            .background(
-                                if (checked) Color(0xFF2E9463)
-                                else Color.Transparent,
                             ),
                     ) {
+                        Canvas(Modifier.matchParentSize()) {
+                            if (checked) drawCircle(Color(0x332E9463))
+                            if (progress > 0f) {
+                                drawArc(
+                                    color = Color(0xFF2E9463),
+                                    startAngle = -90f,
+                                    sweepAngle = 360f * progress,
+                                    useCenter = true,
+                                )
+                            }
+                        }
                         Text(
                             date.dayOfMonth.toString(),
                             color = when {
-                                checked -> Color.White
+                                progress >= 0.98f -> Color.White
                                 !inMonth -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
                                 else -> MaterialTheme.colorScheme.onSurface
                             },
                             style = MaterialTheme.typography.labelMedium,
-                            fontWeight = if (checked || isToday) FontWeight.SemiBold else FontWeight.Normal,
+                            fontWeight = if (checked || progress > 0f || isToday) {
+                                FontWeight.SemiBold
+                            } else {
+                                FontWeight.Normal
+                            },
                         )
                     }
                 }
             }
         }
         Text(
-            "Green = checked in · outlined = today · +10 XP once per day",
+            "Green area = learning time ÷ 40 min · outlined = today · check-in is automatic",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.labelSmall,
         )
